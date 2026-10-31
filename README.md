@@ -2,6 +2,8 @@
 
 작은 Windows 검색 창과 한 줄짜리 가격 팝업입니다. 실제 프로젝트와 실행 파일은 `C:\Users\wkdru\Desktop\C#\StockViewer`에 있습니다.
 
+**[최신 StockViewer.exe 다운로드](https://github.com/BaDook2/C-_STOCK_Viewer/releases/latest/download/StockViewer.exe)** — Windows x64용 실행 파일 하나만 받으면 됩니다. .NET과 별도 DLL 설치는 필요 없습니다.
+
 ## 사용
 
 `StockViewer.exe`를 실행하고 종목을 검색합니다. 별도 설치나 API 키 입력은 필요 없습니다. 네이버 공개 시세를 인터넷으로 조회합니다.
@@ -37,3 +39,9 @@ dotnet StockViewer.Tests/bin/Release/net10.0-windows/StockViewer.Tests.dll --pub
 ```
 
 기존 STOCK의 색상·글꼴·둥근 모서리를 유지했습니다. 원본 STOCK 프로젝트는 수정하지 않습니다. 이전 작업 위치에는 이동 안내를 남겼습니다.
+
+## Release 자동 배포
+
+버전 태그를 올리면 GitHub Actions가 Release 빌드·회귀 검증·단일 EXE 실행 확인을 거쳐 GitHub Release에 StockViewer.exe를 첨부합니다. 별도 배포용 토큰 설정은 필요 없습니다. 다음 버전은 예를 들어 `git tag -a v1.0.1 -m "Release v1.0.1"` 후 `git push origin v1.0.1`로 배포합니다.
+
+자세한 실행·수동 재시도·로컬 게시 방법은 [Release 문서](docs/Release.md)를 참고하세요.
