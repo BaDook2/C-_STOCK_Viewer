@@ -14,3 +14,13 @@
 - 최종 EXE 크기: 64897442 bytes.
 - 루트와 publish EXE SHA256 일치: C4DBC5533FF387DDB1F75140657EC11DF114B95B02C1556593E7C737DEE0587F
 - 기존 STOCK 프로젝트 변경 없음. 이전 저장 키를 읽거나 삭제하지 않음.
+
+## GitHub Actions Release · 2026-10-31
+
+- v1.0.0 정식 Release 게시 완료: https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v1.0.0
+- Actions 성공: https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/41154836449
+- Windows hosted runner에서 Release 빌드, 오프라인 회귀 검증 89개, 런타임 포함 단일 파일 게시, EXE만 있는 폴더에서 5초 시작 유지 확인을 통과함.
+- Release 첨부는 StockViewer.exe 한 개이며 크기는 64944526 bytes.
+- 첨부 SHA256과 Release 본문 체크섬 일치: 1D9C44FA3A32DC368BB8AA1AC81783DFC61DB82BD69B5999E5BB924363349989
+- 최신 EXE 직접 다운로드 주소 HTTP 200 확인: https://github.com/BaDook2/C-_STOCK_Viewer/releases/latest/download/StockViewer.exe
+- 배포 워크플로·게시 스크립트·버전 태그 사용 방법은 docs/Release.md에 기록함.
