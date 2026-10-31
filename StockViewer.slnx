@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="StockViewer.Core/StockViewer.Core.csproj" />
+  <Project Path="StockViewer.App/StockViewer.App.csproj" />
+  <Project Path="StockViewer.Tests/StockViewer.Tests.csproj" />
+</Solution>
