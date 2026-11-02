@@ -1,16 +1,28 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace StockViewer.Core;
 
-public sealed record Stock(string Code, string Name, string Market);
+public sealed record Stock(string Code, string Name, string Market, string? Symbol = null)
+{
+    [JsonIgnore] public string DisplayCode => Symbol ?? StockCode.ProviderCode(Code);
+}
 public static class StockCode
 {
-    public static bool IsValid(string code) => code.Length == 6 && code.All(char.IsAsciiLetterOrDigit);
+    // Namespace US identifiers so a six-letter ticker cannot collide with a Korean code.
+    private const string UsPrefix = "US:";
+    public static bool IsDomestic(string code) => code.Length == 6 && code.All(char.IsAsciiLetterOrDigit);
+    public static bool IsUnitedStates(string code) => code.StartsWith(UsPrefix, StringComparison.Ordinal)
+        && code.Length is > 3 and <= 27 && char.IsAsciiLetterOrDigit(code[3])
+        && !code.AsSpan(3).ContainsAnyExcept("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-");
+    public static bool IsValid(string code) => IsDomestic(code) || IsUnitedStates(code);
+    public static string ProviderCode(string code) => code.StartsWith(UsPrefix, StringComparison.Ordinal) ? code[3..] : code;
 }
 public sealed record Quote(string Code, decimal Price, decimal ChangePercent, DateTimeOffset ReceivedAt,
-    string? TradeTime = null, bool IsDemo = false, string Source = "KRX", DateTimeOffset? SourceTime = null, string? MarketStatus = null);
+    string? TradeTime = null, bool IsDemo = false, string Source = "KRX", DateTimeOffset? SourceTime = null, string? MarketStatus = null,
+    string Currency = "KRW");
 public sealed record ConnectionStatus(string Message, bool Connected = false, bool IsDemo = false);
 public sealed record ApiCredentials(string AppKey, string SecretKey, bool IsMock = false)
 {
@@ -45,13 +57,18 @@ public static class StockSearch
         .Where(c => !char.IsWhiteSpace(c))).ToUpperInvariant();
     private static string Chosung(string text) => new(text.Select(c => c is >= '가' and <= '힣'
         ? Initials[(c - '가') / 588] : c).ToArray());
+    public static bool IsExactMatch(Stock stock, string query)
+    {
+        var q = Normalize(query);
+        return Normalize(stock.Name) == q || Normalize(stock.Code) == q || Normalize(stock.DisplayCode) == q;
+    }
     public static Stock[] Find(IEnumerable<Stock> stocks, string query, int limit = 12)
     {
         var q = Normalize(query);
         if (q.Length == 0) return [];
-        return stocks.Select(s => (Stock: s, Name: Normalize(s.Name)))
-            .Where(x => x.Name.Contains(q) || x.Stock.Code.Contains(q) || Chosung(x.Name).Contains(q))
-            .OrderBy(x => x.Name == q || x.Stock.Code == q ? 0 : x.Name.StartsWith(q) ? 1 : 2)
+        return stocks.Select(s => (Stock: s, Name: Normalize(s.Name), Symbol: Normalize(s.DisplayCode), Code: Normalize(s.Code)))
+            .Where(x => x.Name.Contains(q) || x.Symbol.Contains(q) || x.Code.Contains(q) || Chosung(x.Name).Contains(q))
+            .OrderBy(x => x.Name == q || x.Symbol == q || x.Code == q ? 0 : x.Name.StartsWith(q) || x.Symbol.StartsWith(q) ? 1 : 2)
             .ThenBy(x => x.Stock.Name.Length).ThenBy(x => x.Stock.Code)
             .Take(limit).Select(x => x.Stock).ToArray();
     }

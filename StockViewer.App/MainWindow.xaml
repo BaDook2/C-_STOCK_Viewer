@@ -14,7 +14,7 @@
       <Grid Grid.Row="2">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="6"/><ColumnDefinition Width="46"/></Grid.ColumnDefinitions>
         <Grid>
-          <TextBox x:Name="SearchBox" FontSize="12" Padding="9,4" TextChanged="SearchChanged" PreviewKeyDown="SearchKeyDown" PreviewMouseLeftButtonDown="SearchBoxClicked" LostKeyboardFocus="SearchUnfocused" AutomationProperties.Name="종목 이름 또는 코드" ToolTip="종목 이름·코드·초성 입력 후 Enter"/>
+          <TextBox x:Name="SearchBox" FontSize="12" Padding="9,4" TextChanged="SearchChanged" PreviewKeyDown="SearchKeyDown" PreviewMouseLeftButtonDown="SearchBoxClicked" LostKeyboardFocus="SearchUnfocused" AutomationProperties.Name="종목 이름 또는 코드" ToolTip="국내·미국 종목 이름·코드·티커·초성 입력 후 Enter"/>
           <TextBlock x:Name="SearchPlaceholder" Text="종목 검색" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
         </Grid>
         <Button x:Name="SearchButton" Grid.Column="2" Content="검색" FontSize="12" Padding="8,4" Click="SearchClicked" ToolTip="선택한 종목의 가격 팝업 열기"/>
@@ -26,7 +26,7 @@
                 <ListBox.ItemTemplate><DataTemplate>
                   <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/>
-                    <TextBlock Grid.Column="1" Text="{Binding Code}" FontSize="10" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                    <TextBlock Grid.Column="1" Text="{Binding DisplayCode}" FontSize="10" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="7,0,0,0"/>
                   </Grid>
                 </DataTemplate></ListBox.ItemTemplate>
               </ListBox>

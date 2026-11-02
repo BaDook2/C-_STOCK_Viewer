@@ -35,7 +35,7 @@ public static class Program
             {
                 if (args.Contains("--right-click-check")) await RightClickCheck();
                 else if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await RightClickReleaseTests(); await UiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); }
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UnitedStatesDataTests(); await RightClickReleaseTests(); await UiTests(); await UnitedStatesUiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -60,6 +60,15 @@ public static class Program
         Check(StockSearch.Find(stocks, " ").Length == 0, "blank query");
         Check(StockSearch.Find(stocks, "삼성", 2).Length == 2, "bounded results");
         Check(StockCode.IsValid("0000A0") && !StockCode.IsValid("123/45"), "alphanumeric domestic instrument codes");
+        Check(StockCode.IsValid("US:AAPL.O") && StockCode.IsValid("US:BRKb") && StockCode.IsValid("US:SPY"), "US provider identifiers retain their exact spelling");
+        Check(!StockCode.IsValid("US:") && !StockCode.IsValid("US:AAPL.O/other") && !StockCode.IsValid("US:AAPL,SPY")
+            && !StockCode.IsValid("US:AAPL?x=1"), "invalid US identifiers cannot change request paths or batches");
+        Check(StockCode.IsDomestic("ABCDEF") && StockCode.IsUnitedStates("US:ABCDEF") && !StockCode.IsDomestic("US:ABCDEF"), "six-letter US tickers cannot collide with domestic codes");
+        var usStocks = new Stock[] { new("US:AAPL.O", "애플", "NASDAQ", "AAPL"), new("US:BRKb", "버크셔 해서웨이 Class B", "NYSE", "BRK B") };
+        Check(StockSearch.Find(usStocks, "aapl").Single().Code == "US:AAPL.O" && StockSearch.Find(usStocks, "애플").Single().DisplayCode == "AAPL", "US ticker and Korean name work in cached search");
+        Check(StockSearch.Find(usStocks, "brkb").Single().Code == "US:BRKb" && StockSearch.IsExactMatch(usStocks[1], "brk b"), "class-share symbols normalize spaces and case without modifying provider IDs");
+        var oldStock = JsonSerializer.Deserialize<Stock>("{\"Code\":\"005930\",\"Name\":\"삼성전자\",\"Market\":\"KOSPI\"}")!;
+        Check(oldStock.DisplayCode == "005930" && JsonSerializer.Deserialize<Stock>(JsonSerializer.Serialize(usStocks[1])) == usStocks[1], "old domestic and new US catalog caches are compatible");
         var quote = KiwoomParser.Snapshot("005930", Json("{\"cur_prc\":\"-72,500\",\"flu_rt\":\"-1.25\"}"));
         Check(quote.Price == 72500 && quote.ChangePercent == -1.25m, "negative price sign normalized; negative percent retained");
         var tick = KiwoomParser.Realtime(Json(Tick("005930", "+73500", "+2.50"))).Single();
@@ -135,7 +144,9 @@ public static class Program
         var catalog = await service.GetStocksAsync();
         Check(catalog.Count == 2 && catalog.Any(s => s.Market == "KOSDAQ"), "public catalog without key");
         var results = await service.SearchAsync("삼성");
-        Check(results.Count == 2 && results.Any(s => s.Code == "0000A0") && results.All(s => s.Code != "AAPL"), "public autocomplete supports domestic alphanumeric codes");
+        Check(results.Count == 6 && results.Any(s => s.Code == "0000A0") && results.Any(s => s.Code == "US:AAPL.O" && s.DisplayCode == "AAPL"), "public autocomplete includes domestic and US stocks");
+        Check(results.Any(s => s.Code == "US:SPY") && results.Any(s => s.Code == "US:BRKb" && s.DisplayCode == "BRK B")
+            && results.All(s => !s.Name.StartsWith("invalid")), "US ETFs and share classes use provider IDs; malformed and unsupported markets are ignored");
         var first = await service.GetSnapshotAsync("005930");
         var repeated = await service.GetSnapshotAsync("005930");
         Check(first.Price == 72500 && first.ChangePercent == -1.25m, "public price and direction parse correctly");
@@ -168,6 +179,74 @@ public static class Program
         await Throws<IOException>(async () => await limited.GetSnapshotAsync("005930"), "rate limit cooldown applies to repeated searches");
         Check(limitedHandler.QuoteRequests == 1, "Retry-After prevents extra network calls");
     }
+    private static JsonElement UsQuoteFrame(object? extended = null) => Json(JsonSerializer.Serialize(new
+    {
+        datas = new[] { new {
+            reutersCode = "AAPL.O", symbolCode = "AAPL", closePrice = "95.00", fluctuationsRatio = "-5.00",
+            compareToPreviousPrice = new { code = "5" }, compareToPreviousClosePrice = "-5.00",
+            localTradedAt = "2026-10-30T16:00:00-04:00", marketStatus = "CLOSE",
+            stockExchangeType = new { name = "NASDAQ", delayTime = 0 }, currencyType = new { code = "USD" }, overMarketPriceInfo = extended
+        } }
+    }));
+    private static async Task UnitedStatesDataTests()
+    {
+        var regular = PublicMarketData.ParseQuotes(UsQuoteFrame(), true).Single();
+        Check(regular.Code == "US:AAPL.O" && regular.Currency == "USD" && regular.Price == 95 && regular.ChangePercent == -5, "regular US price and previous-day percentage retain decimal precision and currency");
+        Check(regular.Source.Contains("NASDAQ") && regular.SourceTime.HasValue && regular.MarketStatus == "CLOSE", "US exchange, timestamp and market status are retained");
+        var afterHours = new { tradingSessionType = "AFTER_MARKET", overPrice = "96.00", fluctuationsRatio = "1.05", localTradedAt = "2026-10-30T17:00:00-04:00", overMarketStatus = "OPEN" };
+        var after = PublicMarketData.ParseQuotes(UsQuoteFrame(afterHours), true).Single();
+        Check(after.Price == 96 && after.ChangePercent == -4 && after.Source.Contains("애프터마켓") && after.MarketStatus == "OPEN", "after-hours uses the previous day's close instead of the feed's regular-close percentage");
+        var premarket = new { tradingSessionType = "PRE_MARKET", overPrice = "104.50", localTradedAt = "2026-11-02T08:00:00-05:00", overMarketStatus = "OPEN" };
+        var pre = PublicMarketData.ParseQuotes(UsQuoteFrame(premarket), true).Single();
+        Check(pre.Price == 104.50m && pre.ChangePercent == 10 && pre.Source.Contains("프리마켓"), "premarket uses the last regular close as the previous-day base across a weekend and DST change");
+        var oldExtended = afterHours with { localTradedAt = "2026-10-30T15:00:00-04:00" };
+        Check(PublicMarketData.ParseQuotes(UsQuoteFrame(oldExtended), true).Single().Price == 95, "an older extended quote cannot replace a newer regular quote");
+        var malformedExtended = afterHours with { overPrice = "bad" };
+        Check(PublicMarketData.ParseQuotes(UsQuoteFrame(malformedExtended), true).Single().Price == 95, "malformed extended data preserves the valid regular quote");
+        var missingBase = UsQuoteFrame(afterHours).GetRawText().Replace("\"compareToPreviousClosePrice\":\"-5.00\"", "\"compareToPreviousClosePrice\":\"bad\"");
+        Check(PublicMarketData.ParseQuotes(Json(missingBase), true).Single().Price == 95, "missing after-hours daily base preserves the regular quote instead of using an incorrect percentage");
+        Check(PublicMarketData.ParseQuotes(Json(UsQuoteFrame(afterHours).GetRawText().Replace("\"-5.00\"", "\"bad\"")), true).Length == 0,
+            "a malformed regular base is never shown as a made-up US daily return");
+        Check(PublicMarketData.ParseQuotes(Json(UsQuoteFrame().GetRawText().Replace("\"USD\"", "\"EUR\"")), true).Length == 0, "unexpected foreign currencies cannot be mislabeled as dollars");
+        Check(PublicMarketData.ParseQuotes(UsQuoteFrame()).Length == 0, "US response rows cannot leak into the domestic parser");
+
+        var handler = new PublicHttpFixture();
+        await using var service = new PublicMarketData(handler);
+        var apple = await service.GetSnapshotAsync("US:AAPL.O");
+        var repeated = await service.GetSnapshotAsync("US:AAPL.O");
+        await service.GetSnapshotAsync("US:BRKb");
+        await service.GetSnapshotAsync("US:SPY");
+        await service.GetSnapshotAsync("US:ABCDEF");
+        Check(apple == repeated && apple.Price == 123.45m && handler.UsQuoteRequests == 4 && handler.DomesticQuoteRequests == 0, "US snapshots and duplicate popups share cached worldstock requests");
+        Check(handler.RequestedPaths.Any(p => p.EndsWith("/BRKb")) && handler.RequestedPaths.Any(p => p.EndsWith("/SPY"))
+            && handler.RequestedPaths.All(p => !p.Contains("US:")), "requests preserve opaque provider IDs and remove only the internal US namespace");
+        Check(!handler.HadAuthorization, "US data also needs no account, token or broker key");
+
+        var mixedHandler = new PublicHttpFixture { UsInterval = 70000 };
+        await using var mixed = new PublicMarketData(mixedHandler);
+        var delivered = new HashSet<string>(); mixed.QuoteReceived += q => delivered.Add(q.Code);
+        await mixed.SetSubscriptionsAsync(["005930", "US:AAPL.O", "US:SPY", "US:AAPL.O"]); mixed.Start();
+        await Until(() => delivered.Count == 3);
+        Check(mixedHandler.DomesticQuoteRequests == 1 && mixedHandler.UsQuoteRequests == 1 && mixedHandler.LastBatchSize == 2, "mixed markets are batched separately without duplicate subscriptions");
+        await Until(() => mixedHandler.DomesticQuoteRequests >= 2);
+        Check(mixedHandler.UsQuoteRequests == 1, "a 70-second US interval does not slow two-second domestic updates");
+        await mixed.SetSubscriptionsAsync([]);
+        var requestCount = mixedHandler.QuoteRequests; await Task.Delay(100);
+        Check(mixedHandler.QuoteRequests == requestCount, "closing all mixed-market popups stops both feeds");
+
+        var failingHandler = new PublicHttpFixture { FailDomestic = true };
+        await using var independent = new PublicMarketData(failingHandler);
+        var usDelivered = false; independent.QuoteReceived += q => usDelivered |= q.Code == "US:AAPL.O";
+        await independent.SetSubscriptionsAsync(["005930", "US:AAPL.O"]); independent.Start();
+        await Until(() => usDelivered);
+        Check(failingHandler.DomesticQuoteRequests >= 1 && failingHandler.UsQuoteRequests == 1, "failure of one market still allows the other market's quotes in the same cycle");
+        var missingHandler = new PublicHttpFixture { MissingCode = "AAPL.O" };
+        await using var missing = new PublicMarketData(missingHandler);
+        var missingReported = false; missing.StatusChanged += status => missingReported |= !status.Connected;
+        await missing.SetSubscriptionsAsync(["005930", "US:AAPL.O"]); missing.Start();
+        await Until(() => missingReported);
+        Check((await missing.GetSnapshotAsync("005930")).Price > 0, "a missing US quote is reported without faulting the poller or discarding the domestic quote");
+    }
     private static async Task LivePublicSmoke()
     {
         await using var service = new PublicMarketData();
@@ -179,6 +258,18 @@ public static class Program
         var quote = await service.GetSnapshotAsync("005930", limit.Token);
         Check(quote.Price > 0 && quote.SourceTime.HasValue, "live public quote has price and provider timestamp");
         Check(service.PollingInterval >= TimeSpan.FromSeconds(2), "live provider polling interval respected");
+        var english = await service.SearchAsync("AAPL", limit.Token);
+        var korean = await service.SearchAsync("애플", limit.Token);
+        var apple = english.Single(s => s.DisplayCode == "AAPL");
+        Check(korean.Any(s => s.Code == apple.Code), "live US ticker and Korean-name searches resolve the same provider ID");
+        foreach (var query in new[] { "AAPL", "SPY", "BRK" })
+        {
+            var result = query == "AAPL" ? english : await service.SearchAsync(query, limit.Token);
+            var stock = result.First(s => StockCode.IsUnitedStates(s.Code));
+            var usQuote = await service.GetSnapshotAsync(stock.Code, limit.Token);
+            Check(usQuote.Price > 0 && usQuote.SourceTime.HasValue && usQuote.Currency == "USD", $"live US quote without credentials: {stock.DisplayCode}");
+            Console.WriteLine($"US smoke: {stock.DisplayCode}; {usQuote.Source}; market {usQuote.MarketStatus}; provider interval {service.PollingInterval.TotalSeconds:0.#}s.");
+        }
         Console.WriteLine($"Public smoke: provider interval {service.PollingInterval.TotalSeconds:0.#}s; market {quote.MarketStatus}; no credentials used.");
     }
     private static async Task UiTests()
@@ -297,6 +388,57 @@ public static class Program
         RightClick(replacement, 2);
         await Until(() => ended == 1);
         Check(main.Popups.Count == 0 && !replacement.IsVisible, "closing the last quote ends the session once");
+    }
+    private static async Task UnitedStatesUiTests()
+    {
+        var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-us-" + Guid.NewGuid().ToString("N")));
+        store.SaveDisplayName(true);
+        var handler = new PublicHttpFixture();
+        var service = new PublicMarketData(handler);
+        var catalog = await service.SearchAsync("AAPL");
+        var main = new MainWindow(store, false); main.Show(); await main.UseServiceAsync(service, catalog);
+        var display = (CheckBox)main.FindName("DisplayName");
+        var search = (TextBox)main.FindName("SearchBox");
+        var results = (ListBox)main.FindName("SearchResults");
+        main.Activate(); search.Focus(); search.Text = "aapl";
+        await Task.Delay(350); await Idle();
+        // A ticker match must win even when another autocomplete row is selected.
+        results.SelectedIndex = 0;
+        search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search), Environment.TickCount, Key.Enter)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        await Until(() => main.Popups.TryGetValue("US:AAPL.O", out var popup) && popup.LastQuote is not null);
+        var apple = main.Popups["US:AAPL.O"];
+        Check(apple.DisplayedPrice == "$123.45" && apple.NameVisible, "Enter on a lowercase US ticker opens the exact dollar-priced stock");
+        Check(((TextBlock)apple.FindName("PercentText")).Text == "-1.25%" && apple.ActualHeight <= 32 && apple.ActualWidth < 300,
+            "US price and daily percentage fit the existing one-line compact popup");
+        SaveImage(apple, "quote-us-named.png");
+        apple.ApplyQuote(new("US:AAPL.O", .1234m, 1.5m, DateTimeOffset.UtcNow, "160001", Currency: "USD"));
+        Check(apple.DisplayedPrice == "$0.1234", "sub-dollar US prices preserve up to four decimal places");
+        apple.ApplyQuote(new("US:AAPL.O", 1234.50m, 1.5m, DateTimeOffset.UtcNow, "160002", Currency: "USD"));
+        Check(apple.DisplayedPrice == "$1,234.50", "US dollar prices retain grouping and two minimum decimal places");
+        display.IsChecked = false;
+        var domestic = (await main.OpenStockAsync(catalog.Single(s => s.Code == "005930")))!;
+        var replacement = (await main.OpenStockAsync(catalog.Single(s => s.Code == "US:AAPL.O")))!; await Idle();
+        Check(!apple.IsVisible && !replacement.NameVisible && !domestic.NameVisible && domestic.DisplayedPrice == "72,500원" && main.Popups.Count == 2,
+            "replacing a US popup captures its name preference and preserves the domestic popup");
+        handler.MissingCode = "SPY";
+        var unavailable = (await main.OpenStockAsync(catalog.Single(s => s.Code == "US:SPY")))!;
+        Check(unavailable.IsVisible && unavailable.LastQuote is null && unavailable.StatusMessage.Contains("조회 실패"),
+            "a missing US price leaves an error popup instead of crashing the search window");
+        unavailable.Close(); handler.MissingCode = null;
+        SaveImage(replacement, "quote-us-price-only.png");
+        RightClick(replacement, 1); await Idle();
+        Check(replacement.IsFixed && replacement.Topmost, "US popups use the same right-click Fix behavior");
+        var ended = 0; main.SessionEnded += (_, _) => ended++;
+        main.Close(); await Idle();
+        Check(!main.IsVisible && domestic.IsVisible && replacement.IsVisible && ended == 0, "closing search preserves both domestic and US popups");
+        var lastQuote = replacement.LastQuote;
+        await Until(() => !ReferenceEquals(lastQuote, replacement.LastQuote));
+        Check(replacement.DisplayedPrice == "$123.45", "US prices continue updating after search closes");
+        RightClick(domestic, 2); await Idle();
+        Check(!domestic.IsVisible && replacement.IsVisible && ended == 0, "double-right closing one market preserves the other popup");
+        RightClick(replacement, 2); await Until(() => ended == 1);
+        Check(main.Popups.Count == 0, "closing the last US popup ends the mixed-market session");
     }
     private static async Task AutocompleteFocusTests()
     {
@@ -598,10 +740,12 @@ public static class Program
     }
     private sealed class PublicHttpFixture : HttpMessageHandler
     {
-        public int QuoteRequests, LastBatchSize;
-        public int Interval = 2000;
-        public bool HadAuthorization, RateLimited;
+        public int QuoteRequests, LastBatchSize, DomesticQuoteRequests, UsQuoteRequests;
+        public int Interval = 2000, UsInterval = 2000;
+        public bool HadAuthorization, RateLimited, FailDomestic;
+        public string? MissingCode;
         public List<DateTimeOffset> RequestTimes { get; } = [];
+        public List<string> RequestedPaths { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             HadAuthorization |= request.Headers.Authorization is not null;
@@ -609,23 +753,34 @@ public static class Program
             object body;
             if (uri.Host == "ac.stock.naver.com")
                 body = new { items = new[] {
-                    new { code = "005930", name = "삼성전자", typeCode = "KOSPI", nationCode = "KOR" },
-                    new { code = "0000A0", name = "예시 ETF", typeCode = "ETF", nationCode = "KOR" },
-                    new { code = "AAPL", name = "애플", typeCode = "NASDAQ", nationCode = "USA" } } };
+                    new { code = "005930", name = "삼성전자", typeCode = "KOSPI", nationCode = "KOR", reutersCode = "005930" },
+                    new { code = "0000A0", name = "예시 ETF", typeCode = "ETF", nationCode = "KOR", reutersCode = "0000A0" },
+                    new { code = "AAPL", name = "애플", typeCode = "NASDAQ", nationCode = "USA", reutersCode = "AAPL.O" },
+                    new { code = "SPY", name = "SPDR S&P 500", typeCode = "AMEX", nationCode = "USA", reutersCode = "SPY" },
+                    new { code = "BRK B", name = "버크셔 해서웨이 Class B", typeCode = "NYSE", nationCode = "USA", reutersCode = "BRKb" },
+                    new { code = "ABCDEF", name = "six-letter ticker", typeCode = "NASDAQ", nationCode = "USA", reutersCode = "ABCDEF" },
+                    new { code = "7203", name = "invalid market", typeCode = "TOKYO", nationCode = "JPN", reutersCode = "7203.T" },
+                    new { code = "AAPL", name = "invalid missing provider ID", typeCode = "NASDAQ", nationCode = "USA", reutersCode = "" },
+                    new { code = "AAPL", name = "invalid provider ID", typeCode = "NASDAQ", nationCode = "USA", reutersCode = "AAPL.O/other" } } };
             else if (uri.Host == "m.stock.naver.com")
                 body = new { stocks = new[] { new { itemCode = uri.AbsolutePath.Contains("KOSDAQ") ? "196170" : "005930", stockName = "검색 종목" } } };
             else if (uri.Host == "polling.finance.naver.com")
             {
-                QuoteRequests++; RequestTimes.Add(DateTimeOffset.UtcNow);
+                QuoteRequests++; RequestTimes.Add(DateTimeOffset.UtcNow); RequestedPaths.Add(uri.AbsolutePath);
+                var us = uri.AbsolutePath.Contains("/worldstock/");
+                if (us) UsQuoteRequests++; else DomesticQuoteRequests++;
                 if (RateLimited)
                 {
                     var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
                     limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(30));
                     return Task.FromResult(limited);
                 }
-                var codes = uri.Segments.Last().Split(','); LastBatchSize = codes.Length;
-                body = new { pollingInterval = Interval, datas = codes.Select(code => new {
-                    itemCode = code, closePrice = "72,500", fluctuationsRatio = "1.25", compareToPreviousPrice = new { code = "5" },
+                if (!us && FailDomestic) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                var codes = Uri.UnescapeDataString(uri.Segments.Last()).Split(','); LastBatchSize = codes.Length;
+                body = new { pollingInterval = us ? UsInterval : Interval, datas = codes.Where(code => code != MissingCode).Select(code => new {
+                    itemCode = us ? "" : code, reutersCode = us ? code : "", closePrice = us ? "123.45" : "72,500",
+                    fluctuationsRatio = "1.25", compareToPreviousPrice = new { code = "5" },
+                    stockExchangeType = new { name = us ? "NASDAQ" : "KRX", delayTime = 0 }, currencyType = new { code = us ? "USD" : "KRW" },
                     localTradedAt = "2026-10-30T15:30:00+09:00", marketStatus = "CLOSE" }).ToArray() };
             }
             else throw new Exception("Unexpected public host.");

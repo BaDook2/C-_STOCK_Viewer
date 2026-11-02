@@ -43,7 +43,7 @@ public partial class MainWindow : Window
                 await UsePublicServiceAsync();
             }
             catch (OperationCanceledException) when (closing) { }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
             { if (!closing) ShowStatus(new("공개 시세 연결 실패 · 네트워크를 확인해 주세요")); }
         };
         Closed += OnClosed;
@@ -83,7 +83,7 @@ public partial class MainWindow : Window
             RefreshSuggestions();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
         { /* Cached names and remote autocomplete still work if the initial list is unavailable. */ }
     }
     public async Task UseServiceAsync(IMarketDataService client, IReadOnlyList<Stock> catalog)
@@ -165,7 +165,7 @@ public partial class MainWindow : Window
             if (!closing && ReferenceEquals(service, client) && popups.TryGetValue(popup.Stock.Code, out var current) && ReferenceEquals(current, popup)) popup.ApplyQuote(quote);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception e) when (e is IOException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
         { if (!closing && ReferenceEquals(service, client) && popups.TryGetValue(popup.Stock.Code, out var current) && ReferenceEquals(current, popup)) popup.ShowError("시세 조회 실패 · 네트워크를 확인해 주세요"); }
     }
     private void CancelPendingSearch()
@@ -213,7 +213,7 @@ public partial class MainWindow : Window
             NoResults.Visibility = matches.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception e) when (e is IOException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+        catch (Exception e) when (e is IOException or InvalidDataException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
         { /* Keep cached local suggestions when public search is unavailable. */ }
     }
     private void SearchChanged(object sender, TextChangedEventArgs e) { if (!suppressSearch) RefreshSuggestions(openDropdown: true); }
@@ -232,7 +232,7 @@ public partial class MainWindow : Window
         if (pendingSearch is { } pending) await pending;
         if (closing || searchClosed || query != StockSearch.Normalize(SearchBox.Text)) return;
         var found = StockSearch.Find(stocks, SearchBox.Text);
-        var chosen = found.FirstOrDefault(s => s.Code == query || StockSearch.Normalize(s.Name) == query)
+        var chosen = found.FirstOrDefault(s => StockSearch.IsExactMatch(s, query))
             ?? (SearchResults.SelectedItem as Stock) ?? found.FirstOrDefault();
         if (chosen is null) { Suggestions.IsOpen = true; return; }
         await SelectAndOpenAsync(chosen);

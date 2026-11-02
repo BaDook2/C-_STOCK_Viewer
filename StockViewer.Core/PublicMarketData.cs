@@ -57,7 +57,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
             {
                 if (row.ValueKind != JsonValueKind.Object) continue;
                 var code = KiwoomParser.Text(row, "itemCode"); var name = KiwoomParser.Text(row, "stockName");
-                if (StockCode.IsValid(code) && name.Length > 0) all[code] = new(code, name, market);
+                if (StockCode.IsDomestic(code) && name.Length > 0) all[code] = new(code, name, market);
             }
         }
         if (all.Count == 0) throw new InvalidDataException("공개 종목 목록이 비어 있습니다.");
@@ -69,9 +69,25 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         var root = await GetJsonAsync("https://ac.stock.naver.com/ac?q=" + Uri.EscapeDataString(query.Trim()) + "&target=stock&st=111", cancellation);
         if (!root.TryGetProperty("items", out var rows) || rows.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("공개 검색 응답 형식을 확인할 수 없습니다.");
-        return rows.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object && KiwoomParser.Text(r, "nationCode") == "KOR")
-            .Select(r => new Stock(KiwoomParser.Text(r, "code"), KiwoomParser.Text(r, "name"), KiwoomParser.Text(r, "typeCode")))
-            .Where(s => StockCode.IsValid(s.Code) && s.Name.Length > 0).DistinctBy(s => s.Code).Take(12).ToArray();
+        var result = new List<Stock>();
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object) continue;
+            var name = KiwoomParser.Text(row, "name");
+            var market = KiwoomParser.Text(row, "typeCode");
+            var symbol = KiwoomParser.Text(row, "code");
+            if (name.Length == 0 || symbol.Length == 0) continue;
+            if (KiwoomParser.Text(row, "nationCode") == "KOR" && StockCode.IsDomestic(symbol))
+                result.Add(new(symbol, name, market));
+            else if (KiwoomParser.Text(row, "nationCode") == "USA")
+            {
+                // Provider IDs are opaque: AAPL.O, SPY and BRKb are all valid.
+                // Never infer a suffix from the exchange or the displayed ticker.
+                var code = "US:" + KiwoomParser.Text(row, "reutersCode");
+                if (StockCode.IsUnitedStates(code)) result.Add(new(code, name, market, symbol));
+            }
+        }
+        return result.DistinctBy(s => s.Code).Take(12).ToArray();
     }
     public static TimeSpan ReadPollingInterval(JsonElement root)
     {
@@ -82,7 +98,15 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
             throw new InvalidDataException("공개 시세 갱신 간격 형식을 확인할 수 없습니다.");
         return TimeSpan.FromMilliseconds(Math.Max(DefaultInterval.TotalMilliseconds, ms));
     }
-    public static Quote[] ParseQuotes(JsonElement root)
+    private static decimal ApplyDirection(JsonElement row, decimal value)
+    {
+        if (!row.TryGetProperty("compareToPreviousPrice", out var direction) || direction.ValueKind != JsonValueKind.Object) return value;
+        return KiwoomParser.Text(direction, "code") switch
+        { "4" or "5" => -Math.Abs(value), "1" or "2" => Math.Abs(value), "3" => 0, _ => value };
+    }
+    private static DateTimeOffset? ReadSourceTime(JsonElement row) => DateTimeOffset.TryParse(
+        KiwoomParser.Text(row, "localTradedAt"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) ? time : null;
+    public static Quote[] ParseQuotes(JsonElement root, bool unitedStates = false)
     {
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("datas", out var rows) || rows.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("공개 시세 응답 형식을 확인할 수 없습니다.");
@@ -92,19 +116,49 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
             if (row.ValueKind != JsonValueKind.Object) continue;
             try
             {
-                var code = KiwoomParser.Text(row, "itemCode");
+                var code = unitedStates ? "US:" + KiwoomParser.Text(row, "reutersCode") : KiwoomParser.Text(row, "itemCode");
                 var price = KiwoomParser.Number(row, "closePrice");
-                var percent = KiwoomParser.Number(row, "fluctuationsRatio");
-                if (!StockCode.IsValid(code) || price <= 0) continue;
-                if (row.TryGetProperty("compareToPreviousPrice", out var direction) && direction.ValueKind == JsonValueKind.Object)
-                    percent = KiwoomParser.Text(direction, "code") switch
-                    { "4" or "5" => -Math.Abs(percent), "1" or "2" => Math.Abs(percent), "3" => 0, _ => percent };
-                DateTimeOffset? sourceTime = DateTimeOffset.TryParse(KiwoomParser.Text(row, "localTradedAt"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ? parsed : null;
-                var source = "네이버 공개 시세 · KRX";
-                if (row.TryGetProperty("stockExchangeType", out var exchange) && exchange.ValueKind == JsonValueKind.Object && exchange.TryGetProperty("delayTime", out var delay)
-                    && int.TryParse(delay.ToString(), out var minutes) && minutes > 0) source += $" · {minutes}분 지연";
+                var percent = ApplyDirection(row, KiwoomParser.Number(row, "fluctuationsRatio"));
+                if (!(unitedStates ? StockCode.IsUnitedStates(code) : StockCode.IsDomestic(code)) || price <= 0) continue;
+                var currency = unitedStates ? "USD" : "KRW";
+                if (row.TryGetProperty("currencyType", out var currencyInfo) && currencyInfo.ValueKind == JsonValueKind.Object
+                    && KiwoomParser.Text(currencyInfo, "code") != currency) continue;
+                var sourceTime = ReadSourceTime(row);
+                var marketStatus = KiwoomParser.Text(row, "marketStatus");
+                var source = "네이버 공개 시세 · " + (unitedStates ? "미국" : "KRX");
+                if (row.TryGetProperty("stockExchangeType", out var exchange) && exchange.ValueKind == JsonValueKind.Object)
+                {
+                    if (unitedStates && KiwoomParser.Text(exchange, "name") is { Length: > 0 } name) source = "네이버 공개 시세 · " + name;
+                    if (exchange.TryGetProperty("delayTime", out var delay) && int.TryParse(delay.ToString(), out var minutes) && minutes > 0)
+                        source += $" · {minutes}분 지연";
+                }
+                if (unitedStates && sourceTime.HasValue && row.TryGetProperty("overMarketPriceInfo", out var extended)
+                    && extended.ValueKind == JsonValueKind.Object)
+                {
+                    try
+                    {
+                        var session = KiwoomParser.Text(extended, "tradingSessionType");
+                        var extendedTime = ReadSourceTime(extended);
+                        var extendedPrice = KiwoomParser.Number(extended, "overPrice");
+                        if (session is "PRE_MARKET" or "AFTER_MARKET" && extendedTime > sourceTime && extendedPrice > 0)
+                        {
+                            // Premarket follows the previous session's regular close. After-hours
+                            // follows today's close, so reconstruct the previous day's close.
+                            // The extended feed's own percentage uses a different base.
+                            var previousClose = session == "PRE_MARKET" ? price
+                                : price - ApplyDirection(row, KiwoomParser.Number(row, "compareToPreviousClosePrice"));
+                            if (previousClose > 0)
+                            {
+                                price = extendedPrice; percent = (price / previousClose - 1) * 100;
+                                sourceTime = extendedTime; marketStatus = KiwoomParser.Text(extended, "overMarketStatus");
+                                source += session == "PRE_MARKET" ? " · 프리마켓" : " · 애프터마켓";
+                            }
+                        }
+                    }
+                    catch (InvalidDataException) { /* Preserve the valid regular quote when extended data is incomplete. */ }
+                }
                 result.Add(new(code, price, percent, DateTimeOffset.UtcNow, sourceTime?.ToOffset(TimeSpan.FromHours(9)).ToString("HHmmss"),
-                    Source: source, SourceTime: sourceTime, MarketStatus: KiwoomParser.Text(row, "marketStatus")));
+                    Source: source, SourceTime: sourceTime, MarketStatus: marketStatus, Currency: currency));
             }
             catch (InvalidDataException) { /* A malformed row must not suppress other symbols. */ }
         }
@@ -114,26 +168,36 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
     {
         var now = DateTimeOffset.UtcNow;
         var due = codes.Where(c => !nextFetch.TryGetValue(c, out var next) || next <= now).Distinct().ToArray();
-        foreach (var batch in due.Chunk(20))
+        Exception? failure = null;
+        foreach (var market in due.GroupBy(StockCode.IsUnitedStates))
+        foreach (var batch in market.Chunk(20))
         {
-            var root = await GetJsonAsync("https://polling.finance.naver.com/api/realtime/domestic/stock/" + string.Join(',', batch), cancellation);
-            var interval = ReadPollingInterval(root);
-            var quotes = ParseQuotes(root).Where(q => batch.Contains(q.Code)).ToArray();
-            PollingInterval = interval;
-            foreach (var quote in quotes)
+            try
             {
-                cache[quote.Code] = quote;
-                nextFetch[quote.Code] = DateTimeOffset.UtcNow + interval;
-                if (Volatile.Read(ref subscriptions).Contains(quote.Code)) QuoteReceived?.Invoke(quote);
+                var path = market.Key ? "worldstock" : "domestic";
+                var providerCodes = batch.Select(c => Uri.EscapeDataString(StockCode.ProviderCode(c)));
+                var root = await GetJsonAsync($"https://polling.finance.naver.com/api/realtime/{path}/stock/" + string.Join(',', providerCodes), cancellation);
+                var interval = ReadPollingInterval(root);
+                var quotes = ParseQuotes(root, market.Key).Where(q => batch.Contains(q.Code)).ToArray();
+                PollingInterval = interval;
+                // Each market retains its own due times; a closed US market must not slow KRX.
+                foreach (var code in batch) nextFetch[code] = DateTimeOffset.UtcNow + interval;
+                foreach (var quote in quotes)
+                {
+                    cache[quote.Code] = quote;
+                    if (Volatile.Read(ref subscriptions).Contains(quote.Code)) QuoteReceived?.Invoke(quote);
+                }
+                if (batch.Except(quotes.Select(q => q.Code)).Any())
+                    failure ??= new InvalidDataException("일부 종목의 공개 시세가 제공되지 않습니다.");
+                else StatusChanged?.Invoke(new($"공개 시세 연결 · {interval.TotalSeconds:0.#}초 간격 (제공처 기준)", true));
             }
-            var missing = batch.Except(quotes.Select(q => q.Code)).ToArray();
-            if (missing.Length > 0)
+            catch (Exception ex) when (!cancellation.IsCancellationRequested
+                && (ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException))
             {
-                foreach (var code in missing) nextFetch[code] = DateTimeOffset.UtcNow + interval;
-                throw new InvalidDataException("일부 종목의 공개 시세가 제공되지 않습니다.");
+                failure ??= ex; // Still deliver the other market's valid quotes in this cycle.
             }
-            StatusChanged?.Invoke(new($"공개 시세 연결 · {interval.TotalSeconds:0.#}초 간격 (제공처 기준)", true));
         }
+        if (failure is not null) throw failure;
     }
     public async Task<Quote> GetSnapshotAsync(string code, CancellationToken cancellation = default)
     {
@@ -180,7 +244,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                 failures = 0;
             }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { break; }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or OperationCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
             {
                 delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(++failures, 5))));
                 if (ex is PublicRateLimitException limited && limited.RetryAfter > delay) delay = limited.RetryAfter;

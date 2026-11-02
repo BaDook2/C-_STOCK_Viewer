@@ -48,7 +48,9 @@ public partial class QuoteWindow : Window
         if (quote.Code != Stock.Code || LastQuote is { TradeTime: not null } && quote.TradeTime is null && !quote.IsDemo) return;
         if (LastQuote?.SourceTime is { } last && quote.SourceTime is { } current && current < last) return;
         LastQuote = quote;
-        PriceText.Text = quote.Price.ToString("N0", CultureInfo.GetCultureInfo("ko-KR")) + "원";
+        PriceText.Text = quote.Currency == "USD"
+            ? "$" + quote.Price.ToString("#,##0.00##", CultureInfo.InvariantCulture)
+            : quote.Price.ToString("N0", CultureInfo.GetCultureInfo("ko-KR")) + "원";
         var sign = quote.ChangePercent > 0 ? "+" : "";
         PercentText.Text = $"{sign}{quote.ChangePercent:0.00}%";
         var brush = (Brush)FindResource(quote.ChangePercent > 0 ? "RedBrush" : quote.ChangePercent < 0 ? "BlueBrush" : "TextSecondaryBrush");

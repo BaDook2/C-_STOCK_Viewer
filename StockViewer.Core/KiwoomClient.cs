@@ -149,7 +149,7 @@ public sealed class KiwoomClient : IMarketDataService
                 foreach (var row in rows.EnumerateArray())
                 {
                     var code = KiwoomParser.Text(row, "code"); var name = KiwoomParser.Text(row, "name");
-                    if (StockCode.IsValid(code) && name.Length > 0) all[code] = new(code, name, label);
+                    if (StockCode.IsDomestic(code) && name.Length > 0) all[code] = new(code, name, label);
                 }
                 next = result.Next;
                 if (next.Length == 0) break;
@@ -161,7 +161,7 @@ public sealed class KiwoomClient : IMarketDataService
     }
     public async Task<Quote> GetSnapshotAsync(string code, CancellationToken cancellation = default)
     {
-        if (!StockCode.IsValid(code)) throw new ArgumentException("잘못된 종목코드입니다.", nameof(code));
+        if (!StockCode.IsDomestic(code)) throw new ArgumentException("잘못된 종목코드입니다.", nameof(code));
         var result = await QueryAsync("ka10001", new { stk_cd = code }, "", cancellation);
         return KiwoomParser.Snapshot(code, result.Root);
     }
@@ -170,7 +170,7 @@ public sealed class KiwoomClient : IMarketDataService
     {
         var values = codes.Distinct().Order().ToArray();
         if (values.Length > 200) throw new InvalidOperationException("동시에 최대 200개 종목까지 표시할 수 있습니다.");
-        if (values.Any(c => !StockCode.IsValid(c))) throw new ArgumentException("잘못된 종목코드입니다.");
+        if (values.Any(c => !StockCode.IsDomestic(c))) throw new ArgumentException("잘못된 종목코드입니다.");
         desired = values;
         await SyncSubscriptionsAsync(cancellation);
     }

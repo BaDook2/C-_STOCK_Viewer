@@ -10,6 +10,10 @@
 
 Quote는 공개 제공처·기준 시각·장 상태를 보존합니다. 종목별 다음 허용 조회 시각을 공유하고, 초기 조회와 정기 폴링의 중복을 막습니다. 기본 2초보다 긴 제공처 pollingInterval과 HTTP Retry-After를 우선합니다.
 
+미국 종목의 내부 Code는 `US:`와 검색 응답의 reutersCode를 결합합니다. `US:AAPL.O`, `US:SPY`, `US:BRKb`처럼 저장하여 국내 6자리 코드와 충돌하지 않게 하고, 요청할 때만 접두사를 제거합니다. Stock.Symbol/DisplayCode는 화면의 티커와 정규화 검색에 사용합니다. 기존 국내 목록 캐시와 Quote 생성자의 기본 KRW 통화를 유지합니다. 레거시 키움 서비스는 국내 코드만 허용합니다.
+
+PublicMarketData는 국내·미국을 별도 경로로 배치 조회하며 종목별 다음 조회 시각을 유지합니다. 미국 Quote는 USD 통화, 거래소, 최신 세션의 기준 시각을 보존합니다. 최신 장전·장후 가격은 세션별 전일 기준을 검증한 뒤 사용하며 전일 대비 등락률을 다시 계산합니다. 불완전한 연장 시세는 유효한 정규장 시세로 처리합니다. UI의 통화 표시는 Quote.Currency를 사용합니다.
+
 팝업의 이름 표시 설정은 생성 시의 스냅샷입니다. 검색 창 체크박스의 후속 변경은 이미 존재하는 창에 전달하지 않습니다. 서비스 전환·재연결은 이름 표시 여부를 변경하지 않고 가격만 초기화합니다.
 
 우클릭은 WPF MouseButtonEventArgs.ClickCount를 사용합니다. 첫 누름은 고정 토글, 두 번째 누름은 종료 예약입니다. 가격 창이 CaptureMode.SubTree로 우클릭의 Up까지 캡처하고 PreviewMouseRightButtonUp을 Handled 처리합니다. 종료는 DispatcherPriority.Background에 예약하여 현재 Up 메시지 처리가 끝난 뒤 캡처를 해제하고 창을 파괴합니다. WM_CONTEXTMENU는 가격 창의 HwndSourceHook에서 소비합니다. 전역 마우스 후크나 Windows 설정 변경은 사용하지 않습니다. 고정 위치는 WM_WINDOWPOSCHANGING에서 SWP_NOMOVE를 설정해 시스템 이동도 막습니다.
