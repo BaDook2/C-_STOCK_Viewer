@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using StockViewer.Core;
 
 namespace StockViewer.App;
@@ -17,6 +18,7 @@ public partial class QuoteWindow : Window
     public string DisplayedPrice => PriceText.Text;
     public string StatusMessage { get; private set; } = "시세 연결 대기";
     private HwndSource? source;
+    private bool rightButtonDown, closeOnRightButtonUp, closeQueued, closed;
     private ConnectionStatus status = new("시세 연결 대기");
     public QuoteWindow(Stock stock, bool showName)
     {
@@ -24,7 +26,12 @@ public partial class QuoteWindow : Window
         StockName.Text = stock.Name; StockName.ToolTip = stock.Name;
         SetNameVisible(showName);
         SourceInitialized += (_, _) => { source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle); source?.AddHook(WindowMessage); };
-        Closed += (_, _) => source?.RemoveHook(WindowMessage);
+        Closed += (_, _) =>
+        {
+            closed = true;
+            if (Mouse.Captured == this) Mouse.Capture(null);
+            source?.RemoveHook(WindowMessage);
+        };
     }
     public void SetNameVisible(bool visible)
     {
@@ -72,15 +79,43 @@ public partial class QuoteWindow : Window
             : "KRX · 최근 조회 " + LastQuote.ReceivedAt.ToOffset(TimeSpan.FromHours(9)).ToString("HH:mm:ss"));
     }
     public void ProcessRightClick(int clickCount)
-    { if (clickCount >= 2) Close(); else if (clickCount == 1) SetFixed(!IsFixed); }
+    {
+        if (closed || closeQueued || !IsVisible || clickCount < 1) return;
+        rightButtonDown = true;
+        if (clickCount >= 2) closeOnRightButtonUp = true;
+        else SetFixed(!IsFixed);
+        // Keep the release directed at this HWND even if the pointer moves out.
+        Mouse.Capture(this, CaptureMode.SubTree);
+    }
     private void PopupRightClick(object sender, MouseButtonEventArgs e)
     { e.Handled = true; ProcessRightClick(e.ClickCount); }
+    private void PopupRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        if (!rightButtonDown || closed) return;
+        rightButtonDown = false;
+        if (closeOnRightButtonUp)
+        {
+            closeOnRightButtonUp = false; closeQueued = true;
+            // Finish WM_RBUTTONUP (and its possible WM_CONTEXTMENU) before
+            // destroying the window. Closing on down leaks up to the desktop.
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                if (closed) return;
+                if (Mouse.Captured == this) Mouse.Capture(null);
+                Close();
+            }));
+        }
+        else if (Mouse.Captured == this) Mouse.Capture(null);
+    }
     private void PopupKeyDown(object sender, KeyEventArgs e)
-    { if (e.Key == Key.Escape) { e.Handled = true; Close(); } }
+    { if (e.Key == Key.Escape) { e.Handled = true; if (rightButtonDown) closeOnRightButtonUp = true; else Close(); } }
     private void DragCard(object sender, MouseButtonEventArgs e)
     { if (!IsFixed && e.ChangedButton == MouseButton.Left && e.ButtonState == MouseButtonState.Pressed) DragMove(); }
     private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == 0x007B) // WM_CONTEXTMENU: this popup has no context menu.
+        { handled = true; return IntPtr.Zero; }
         if (IsFixed && msg == 0x0046 && lParam != IntPtr.Zero) // WM_WINDOWPOSCHANGING: also block native keyboard/system moves.
         {
             var position = Marshal.PtrToStructure<WindowPosition>(lParam);

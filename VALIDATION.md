@@ -67,3 +67,12 @@
 - 새 실행에서는 가격 팝업 없이 X를 한 번 눌러 EXE 프로세스가 종료됨을 확인함. 테스트용 가격 세션은 확인 후 정리함.
 - 배포 EXE 크기 64941546 bytes, 제품 버전 1.0.3+cc4df6114e41b6cee48b34cd3c4576f45b611d18.
 - SHA256: 52479198ADABD4203A5FE89489948419382AD35F8124B1449A8364FFB3782C0E. GitHub 첨부 digest와 일치하며 프로젝트 루트·publish의 EXE도 이 파일로 갱신함.
+
+## 우클릭 더블클릭 종료의 뒤쪽 클릭 전달 차단 · 2026-11-02
+
+- 기존 PreviewMouseRightButtonDown에서 두 번째 누름 즉시 Close하던 동작을 제거함. 버튼을 떼는 이벤트가 끝날 때까지 가격 창과 네이티브 마우스 캡처를 유지함.
+- PreviewMouseRightButtonUp을 Handled 처리하고 현재 입력 메시지 처리가 끝난 뒤 DispatcherPriority.Background에서 Close함. 가격 창의 WM_CONTEXTMENU도 소비하며, 닫을 때 캡처를 정리함.
+- Release 빌드 경고 0 / 오류 0, 오프라인 회귀 검증 129개 통과.
+- Fix/Free 각각의 시작 상태에서 단일 클릭 전환·Up 소비·캡처 해제, 두 번째 Down 직후 창/네이티브 HWND와 GetCapture 유지, 두 번째 Up 처리 직후 창 유지, 다음 Dispatcher 단계에서 HWND 제거와 캡처 해제를 확인함. 기존 코드에서는 Up 소비 검증이 실패함을 먼저 확인함.
+- 테스트의 기존 우클릭 호출도 Down/Up 쌍으로 변경함. 검색 창을 닫은 뒤 마지막 가격 팝업 종료 시 시세 서비스 정리까지 기존 회귀 검증이 통과함.
+- 수동 확인용 테스트 창은 `dotnet StockViewer.Tests/bin/Release/net10.0-windows/StockViewer.Tests.dll --right-click-check`로 열 수 있음. 팝업 뒤의 Up 수신 수·메뉴 열림 수와 닫을 때 버튼이 눌린 상태였는지를 표시함. 컴퓨터 사용 도구는 오른쪽 더블클릭을 직접 지원하지 않아, 버튼 수명과 두 번째 Up 종료는 위 WPF/Win32 회귀 검증으로 확인함.

@@ -12,7 +12,9 @@ Quote는 공개 제공처·기준 시각·장 상태를 보존합니다. 종목�
 
 팝업의 이름 표시 설정은 생성 시의 스냅샷입니다. 검색 창 체크박스의 후속 변경은 이미 존재하는 창에 전달하지 않습니다. 서비스 전환·재연결은 이름 표시 여부를 변경하지 않고 가격만 초기화합니다.
 
-우클릭은 WPF MouseButtonEventArgs.ClickCount를 사용합니다. 첫 클릭은 고정 토글, 두 번째 클릭은 닫기입니다. 고정 위치는 WM_WINDOWPOSCHANGING에서 SWP_NOMOVE를 설정해 시스템 이동도 막습니다.
+우클릭은 WPF MouseButtonEventArgs.ClickCount를 사용합니다. 첫 누름은 고정 토글, 두 번째 누름은 종료 예약입니다. 가격 창이 CaptureMode.SubTree로 우클릭의 Up까지 캡처하고 PreviewMouseRightButtonUp을 Handled 처리합니다. 종료는 DispatcherPriority.Background에 예약하여 현재 Up 메시지 처리가 끝난 뒤 캡처를 해제하고 창을 파괴합니다. WM_CONTEXTMENU는 가격 창의 HwndSourceHook에서 소비합니다. 전역 마우스 후크나 Windows 설정 변경은 사용하지 않습니다. 고정 위치는 WM_WINDOWPOSCHANGING에서 SWP_NOMOVE를 설정해 시스템 이동도 막습니다.
+
+Windows의 [WM_RBUTTONUP 규칙](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-rbuttonup)에 따라 캡처 중인 창이 release를 받습니다. [WM_CONTEXTMENU 문서](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-contextmenu)는 우클릭 Up 처리에서 메뉴 요청이 생성됨을 설명합니다.
 
 검색 창의 Closed는 검색 작업과 자동완성만 정리합니다. 가격 창이 남아 있으면 공통 서비스·구독·시세 Dispatcher 처리는 계속 유지합니다. 검색 창이 닫힌 상태에서 마지막 가격 창이 닫히면 EndSessionAsync가 요청을 취소하고 서비스를 Dispose한 뒤 SessionEnded를 알립니다. App은 OnExplicitShutdown으로 실행하며 이 알림을 받은 뒤 종료합니다. 가격 창이 없는 검색 창을 닫는 경우에도 같은 종료 경로를 사용합니다.
 

@@ -33,8 +33,9 @@ public static class Program
         {
             try
             {
-                if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UiTests(); await SearchInputTests(); await WindowLifetimeTests(); }
+                if (args.Contains("--right-click-check")) await RightClickCheck();
+                else if (args.Contains("--public-smoke")) await LivePublicSmoke();
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await RightClickReleaseTests(); await UiTests(); await SearchInputTests(); await WindowLifetimeTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -227,14 +228,14 @@ public static class Program
         var replacement = (await main.OpenStockAsync(samsung))!; await Idle();
         Check(main.Popups.Count == 2 && !first.IsVisible && !ReferenceEquals(first, replacement), "duplicate replaces only matching popup");
         Check(!replacement.NameVisible && second.NameVisible, "replacement uses current checkbox without modifying other symbols");
-        replacement.ProcessRightClick(1); await Idle();
+        RightClick(replacement, 1); await Idle();
         Check(replacement.Topmost && replacement.IsFixed && ((Border)replacement.FindName("Card")).ContextMenu is null, "single right click fixes directly without context menu");
         var handle = new WindowInteropHelper(replacement).Handle;
         GetWindowRect(handle, out var before);
         SetWindowPos(handle, IntPtr.Zero, before.Left + 90, before.Top + 90, 0, 0, 0x0001 | 0x0004);
         GetWindowRect(handle, out var after);
         Check(before.Left == after.Left && before.Top == after.Top, "fixed native position cannot move");
-        replacement.ProcessRightClick(1); await Idle();
+        RightClick(replacement, 1); await Idle();
         SetWindowPos(handle, IntPtr.Zero, before.Left + 35, before.Top + 35, 0, 0, 0x0001 | 0x0004);
         GetWindowRect(handle, out after);
         Check(!replacement.Topmost && after.Left == before.Left + 35, "Free restores normal z-order and movement");
@@ -277,7 +278,7 @@ public static class Program
         main.WindowState = WindowState.Minimized; await Idle();
         Check(replacement.IsVisible && replacement.WindowState == WindowState.Normal, "minimizing search keeps independent price strip visible");
         main.WindowState = WindowState.Normal; await Idle();
-        second.ProcessRightClick(1); second.ProcessRightClick(2); await Idle();
+        RightClick(second, 1); RightClick(second, 2); await Idle();
         Check(!second.IsVisible && main.Popups.Count == 1, "double right click closes popup and removes its subscription");
         var ended = 0; main.SessionEnded += (_, _) => ended++;
         main.Activate(); search.Focus(); search.Text = "삼성"; await Idle();
@@ -292,7 +293,7 @@ public static class Program
         var lastQuote = replacement.LastQuote;
         await Until(() => !ReferenceEquals(lastQuote, replacement.LastQuote));
         Check(true, "quotes continue refreshing after the search window closes");
-        replacement.ProcessRightClick(2);
+        RightClick(replacement, 2);
         await Until(() => ended == 1);
         Check(main.Popups.Count == 0 && !replacement.IsVisible, "closing the last quote ends the session once");
     }
@@ -384,7 +385,7 @@ public static class Program
         service.Publish(new("005930", 73000, 1.5m, DateTimeOffset.UtcNow));
         await Until(() => popup.DisplayedPrice == "73,000원");
         Check(true, "live quote events still reach a popup after search closes");
-        popup.ProcessRightClick(2); await Until(() => ended == 1);
+        RightClick(popup, 2); await Until(() => ended == 1);
         Check(service.Disposed && service.SnapshotCancellation.IsCancellationRequested && main.Popups.Count == 0,
             "closing the final quote cancels requests and disposes the market service before ending the app");
 
@@ -411,7 +412,70 @@ public static class Program
         Check(!pendingMain.IsVisible && !pendingDropdown.IsOpen
             && pendingDropdown.ReadLocalValue(Popup.IsOpenProperty) is false && keptQuote.IsVisible,
             "a pending search submission cannot reopen any search popup after X closes the search window");
-        keptQuote.ProcessRightClick(2); await Idle();
+        RightClick(keptQuote, 2); await Idle();
+    }
+    private static async Task RightClickReleaseTests()
+    {
+        foreach (var initiallyFixed in new[] { false, true })
+        {
+            var popup = new QuoteWindow(DemoMarketData.SampleStocks[0], true) { Left = 180, Top = 160 };
+            popup.Show(); await Idle(); popup.SetFixed(initiallyFixed);
+            var handle = new WindowInteropHelper(popup).Handle;
+            popup.ProcessRightClick(1);
+            Check(popup.IsFixed != initiallyFixed && popup.IsVisible, "single right-down still toggles Fix/Free");
+            var firstUp = RaiseRightButtonUp(popup);
+            Check(firstUp.Handled && popup.IsVisible && Mouse.Captured is null, "single right-up is consumed and releases capture without closing");
+            popup.ProcessRightClick(2);
+            Check(popup.IsVisible && IsWindow(handle) && Mouse.Captured == popup && GetCapture() == handle,
+                "second right-down retains the native popup and mouse capture until release");
+            var secondUp = RaiseRightButtonUp(popup);
+            Check(secondUp.Handled && popup.IsVisible && IsWindow(handle),
+                "second right-up is consumed before native window destruction");
+            await Idle();
+            Check(!popup.IsVisible && !IsWindow(handle) && Mouse.Captured is null && GetCapture() == IntPtr.Zero,
+                "popup closes after right-up dispatch and leaves no mouse capture");
+        }
+    }
+    private static MouseButtonEventArgs RaiseRightButtonUp(QuoteWindow popup)
+    {
+        var release = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+            { RoutedEvent = UIElement.PreviewMouseRightButtonUpEvent };
+        popup.RaiseEvent(release); return release;
+    }
+    private static void RightClick(QuoteWindow popup, int clickCount)
+    { popup.ProcessRightClick(clickCount); RaiseRightButtonUp(popup); }
+    private static async Task RightClickCheck()
+    {
+        var status = new TextBlock { Margin = new Thickness(18), FontSize = 14, Foreground = Brushes.Black, VerticalAlignment = VerticalAlignment.Top };
+        var host = new Window
+        {
+            Title = "StockViewer right-click check", Width = 500, Height = 240,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Background = Brushes.White, Content = status
+        };
+        var finished = new TaskCompletionSource();
+        var backgroundUps = 0; var menus = 0; var quoteClosed = false;
+        bool? closedWhilePressed = null;
+        void Refresh()
+        {
+            status.Text = $"Background right-button-up: {backgroundUps}\nContext menu openings: {menus}\nQuote closed: {quoteClosed}\nClosed while button pressed: {closedWhilePressed}";
+            Console.WriteLine(status.Text.Replace('\n', ';'));
+        }
+        var menu = new ContextMenu(); menu.Items.Add(new MenuItem { Header = "Test background menu" });
+        host.ContextMenu = menu;
+        host.PreviewMouseRightButtonUp += (_, _) => { backgroundUps++; Refresh(); };
+        host.ContextMenuOpening += (_, _) => { menus++; Refresh(); };
+        QuoteWindow? quote = null;
+        host.Closed += (_, _) => { quote?.Close(); finished.TrySetResult(); };
+        host.Show(); await Idle();
+        quote = new QuoteWindow(DemoMarketData.SampleStocks[0], true);
+        quote.ApplyQuote(new("005930", 72500, 1.25m, DateTimeOffset.UtcNow, IsDemo: true));
+        quote.Closed += (_, _) => { quoteClosed = true; closedWhilePressed = Mouse.RightButton == MouseButtonState.Pressed; Refresh(); };
+        quote.Show(); quote.UpdateLayout();
+        quote.Left = host.Left + (host.ActualWidth - quote.ActualWidth) / 2;
+        quote.Top = host.Top + 135;
+        quote.SetFixed(true);
+        Refresh(); await finished.Task;
     }
     private static async Task Until(Func<bool> condition)
     {
@@ -442,6 +506,7 @@ public static class Program
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetCapture();
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 
     private sealed class DelayedQuoteService : IMarketDataService

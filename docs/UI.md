@@ -8,12 +8,14 @@
 | 검색 입력 | 로컬 초성·코드 검색과 250ms 디바운스 공개 자동완성 | RefreshSuggestions, CompleteSuggestionsAsync |
 | 검색/Enter/결과 클릭 | 현재 체크박스 값으로 종목 팝업 생성. 동일 코드는 교체 | OpenSelectionAsync, OpenStockAsync |
 | 가격 창 우클릭 1회 | Fix/Free를 즉시 전환 | PopupRightClick, ProcessRightClick |
-| 가격 창 우클릭 2회 | 해당 창을 닫고 구독 제거 | PopupRightClick, ProcessRightClick |
+| 가격 창 우클릭 2회 | 두 번째 버튼을 떼는 이벤트를 소비한 뒤 창을 닫고 구독 제거 | PopupRightClick, PopupRightButtonUp |
 | Esc | 가격 창 닫기 또는 검색 자동완성 닫기 | PopupKeyDown, SearchKeyDown |
 | 검색 창 최소화 | 검색 창만 최소화 | Minimize |
 | 검색 창 X | 검색 창만 닫고 가격 창과 수신은 유지. 가격 창이 없으면 프로그램 종료 | OnClosed, EndSessionAsync |
 
 팝업은 높이 32 DIP에 이름·가격·등락률 한 줄입니다. 이름 숨김은 창별로 독립적이고 너비도 줄입니다. 코드·시장·상태줄·버튼·우클릭 메뉴는 표시하지 않습니다. 우클릭 단일/더블 판정은 WPF의 시스템 더블클릭 간격을 따릅니다.
+
+우클릭을 누르면 팝업이 마우스를 캡처하여 포인터를 밖으로 옮겨도 버튼을 떼는 이벤트를 받습니다. 더블클릭의 두 번째 누름에서는 창을 유지하고, 버튼을 떼는 이벤트를 처리한 다음 닫습니다. 일반적인 바탕화면·다른 프로그램의 우클릭 동작은 변경하지 않습니다.
 
 새 가격 팝업은 검색 입력칸을 가리지 않도록 검색 창 아래 4 DIP 간격에 가로 중앙을 맞춰 표시합니다. 화면 아래쪽 공간이 부족하면 검색 창 위에 표시하고 현재 모니터의 작업 영역 안으로 제한합니다. 검색 창을 닫아도 가격 갱신은 계속되며, 마지막 가격 창을 닫을 때 시세 연결을 정리하고 프로그램을 종료합니다.
 
