@@ -29,6 +29,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         DisplayName.IsChecked = settings.LoadDisplayName();
         initialized = true;
+        Deactivated += (_, _) => DismissSuggestions();
+        PreviewMouseDown += (_, _) =>
+        {
+            if (!SearchBox.IsMouseOver && !SearchResults.IsMouseOver) DismissSuggestions();
+        };
         Loaded += async (_, _) =>
         {
             SearchBox.Focus();
@@ -40,7 +45,6 @@ public partial class MainWindow : Window
             catch (OperationCanceledException) when (closing) { }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
             { if (!closing) ShowStatus(new("공개 시세 연결 실패 · 네트워크를 확인해 주세요")); }
-            finally { if (!closing) SettingsButton.IsEnabled = true; }
         };
         Closed += OnClosed;
     }
@@ -112,7 +116,6 @@ public partial class MainWindow : Window
     private void ShowStatus(ConnectionStatus status)
     {
         connection = status;
-        SettingsButton.ToolTip = status.Message + "\n공개 시세 설정";
         foreach (var popup in popups.Values) popup.SetConnection(status);
     }
     private async Task UpdateSubscriptionsAsync()
@@ -163,7 +166,7 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception e) when (e is IOException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
-        { if (!closing && ReferenceEquals(service, client) && popups.TryGetValue(popup.Stock.Code, out var current) && ReferenceEquals(current, popup)) popup.ShowError("시세 조회 실패 · 설정과 네트워크를 확인해 주세요"); }
+        { if (!closing && ReferenceEquals(service, client) && popups.TryGetValue(popup.Stock.Code, out var current) && ReferenceEquals(current, popup)) popup.ShowError("시세 조회 실패 · 네트워크를 확인해 주세요"); }
     }
     private void CancelPendingSearch()
     {
@@ -212,12 +215,15 @@ public partial class MainWindow : Window
     }
     private void SearchChanged(object sender, TextChangedEventArgs e) { if (!suppressSearch) RefreshSuggestions(); }
     private void SearchFocused(object sender, KeyboardFocusChangedEventArgs e) => RefreshSuggestions();
+    private void SearchUnfocused(object sender, KeyboardFocusChangedEventArgs e) => DismissSuggestions();
+    private void DismissSuggestions() => Suggestions.IsOpen = false;
     private async Task OpenSelectionAsync()
     {
+        if (closing || searchClosed) return;
         var query = StockSearch.Normalize(SearchBox.Text);
         if (query.Length == 0) { SearchBox.Focus(); return; }
         if (pendingSearch is { } pending) await pending;
-        if (closing || query != StockSearch.Normalize(SearchBox.Text)) return;
+        if (closing || searchClosed || query != StockSearch.Normalize(SearchBox.Text)) return;
         var found = StockSearch.Find(stocks, SearchBox.Text);
         var chosen = found.FirstOrDefault(s => s.Code == query || StockSearch.Normalize(s.Name) == query)
             ?? (SearchResults.SelectedItem as Stock) ?? found.FirstOrDefault();
@@ -226,6 +232,7 @@ public partial class MainWindow : Window
     }
     private async Task SelectAndOpenAsync(Stock stock)
     {
+        if (closing || searchClosed) return;
         CancelPendingSearch();
         suppressSearch = true; SearchBox.Text = stock.Name; SearchBox.CaretIndex = SearchBox.Text.Length; suppressSearch = false;
         SearchPlaceholder.Visibility = Visibility.Collapsed; Suggestions.IsOpen = false;
@@ -250,21 +257,18 @@ public partial class MainWindow : Window
         if (ItemsControl.ContainerFromElement(SearchResults, e.OriginalSource as DependencyObject) is ListBoxItem { Content: Stock stock })
         { e.Handled = true; await SelectAndOpenAsync(stock); }
     }
-    private async void ResultKeyDown(object sender, KeyEventArgs e)
-    { if (e.Key == Key.Enter && SearchResults.SelectedItem is Stock stock) { e.Handled = true; await SelectAndOpenAsync(stock); } else if (e.Key == Key.Escape) { Suggestions.IsOpen = false; SearchBox.Focus(); } }
     private void DisplayNameChanged(object sender, RoutedEventArgs e)
     {
         try { settings.SaveDisplayName(DisplayName.IsChecked == true); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { ShowStatus(new("표시 설정을 저장하지 못했습니다.", connection.Connected, connection.IsDemo)); }
     }
-    private async void OpenSettings(object sender, RoutedEventArgs e)
-    {
-        Suggestions.IsOpen = false;
-        var dialog = new SettingsWindow(connection.Message) { Owner = this };
-        if (dialog.ShowDialog() == true) await UsePublicServiceAsync();
-    }
     private void DragHeader(object sender, MouseButtonEventArgs e)
-    { if (e.ButtonState == MouseButtonState.Pressed) { Suggestions.IsOpen = false; DragMove(); } }
+    { if (e.ButtonState == MouseButtonState.Pressed) { e.Handled = true; DismissSuggestions(); DragMove(); } }
     private void Minimize(object sender, RoutedEventArgs e) { Suggestions.IsOpen = false; WindowState = WindowState.Minimized; }
-    private void CloseApp(object sender, RoutedEventArgs e) => Close();
+    private void CloseApp(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        DismissSuggestions();
+        if (!searchClosed) Close();
+    }
 }

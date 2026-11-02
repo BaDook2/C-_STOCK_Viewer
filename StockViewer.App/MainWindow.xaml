@@ -3,28 +3,26 @@
   <Border Margin="4" CornerRadius="8" Background="{StaticResource CanvasBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="9,3,9,8">
     <Grid>
       <Grid.RowDefinitions><RowDefinition Height="22"/><RowDefinition Height="5"/><RowDefinition Height="30"/></Grid.RowDefinitions>
-      <Grid Background="Transparent" MouseLeftButtonDown="DragHeader">
+      <Grid Background="Transparent">
+        <Border Background="Transparent" MouseLeftButtonDown="DragHeader"/>
         <CheckBox x:Name="DisplayName" Content="종목이름 Display" FontSize="11" IsChecked="True" HorizontalAlignment="Left" VerticalAlignment="Center" Click="DisplayNameChanged" ToolTip="이후 새로 여는 팝업에 종목 이름을 표시합니다."/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-          <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Width="24" Height="22" Click="OpenSettings" ToolTip="공개 시세 설정" AutomationProperties.Name="시세 설정">
-            <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
-          </Button>
           <Button Style="{StaticResource IconButton}" Width="24" Height="22" Click="Minimize" ToolTip="최소화" AutomationProperties.Name="최소화"><TextBlock Text="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="9"/></Button>
-          <Button x:Name="CloseButton" Style="{StaticResource IconButton}" Width="24" Height="22" Click="CloseApp" ToolTip="검색창 닫기 · 가격 팝업은 유지" AutomationProperties.Name="검색창 닫기"><TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="9"/></Button>
+          <Button x:Name="CloseButton" Style="{StaticResource IconButton}" Width="24" Height="22" ClickMode="Press" Click="CloseApp" ToolTip="검색창 닫기 · 가격 팝업은 유지" AutomationProperties.Name="검색창 닫기"><TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="9"/></Button>
         </StackPanel>
       </Grid>
       <Grid Grid.Row="2">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="6"/><ColumnDefinition Width="46"/></Grid.ColumnDefinitions>
         <Grid>
-          <TextBox x:Name="SearchBox" FontSize="12" Padding="9,4" TextChanged="SearchChanged" PreviewKeyDown="SearchKeyDown" GotKeyboardFocus="SearchFocused" AutomationProperties.Name="종목 이름 또는 코드" ToolTip="종목 이름·코드·초성 입력 후 Enter"/>
+          <TextBox x:Name="SearchBox" FontSize="12" Padding="9,4" TextChanged="SearchChanged" PreviewKeyDown="SearchKeyDown" GotKeyboardFocus="SearchFocused" LostKeyboardFocus="SearchUnfocused" AutomationProperties.Name="종목 이름 또는 코드" ToolTip="종목 이름·코드·초성 입력 후 Enter"/>
           <TextBlock x:Name="SearchPlaceholder" Text="종목 검색" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
         </Grid>
         <Button x:Name="SearchButton" Grid.Column="2" Content="검색" FontSize="12" Padding="8,4" Click="SearchClicked" ToolTip="선택한 종목의 가격 팝업 열기"/>
-        <Popup x:Name="Suggestions" PlacementTarget="{Binding ElementName=SearchBox}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+        <Popup x:Name="Suggestions" PlacementTarget="{Binding ElementName=SearchBox}" Placement="Bottom" StaysOpen="True" Focusable="False" AllowsTransparency="True">
           <Border Background="White" CornerRadius="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="3" Margin="0,3,0,0" Width="{Binding ActualWidth,ElementName=SearchBox}">
             <StackPanel>
-              <ListBox x:Name="SearchResults" MaxHeight="160" BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" PreviewMouseLeftButtonUp="ResultClicked" PreviewKeyDown="ResultKeyDown" AutomationProperties.Name="종목 검색 결과">
-                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="6,6"/></Style></ListBox.ItemContainerStyle>
+              <ListBox x:Name="SearchResults" MaxHeight="160" BorderThickness="0" Background="Transparent" Focusable="False" IsTabStop="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled" PreviewMouseLeftButtonUp="ResultClicked" AutomationProperties.Name="종목 검색 결과">
+                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="6,6"/><Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/></Style></ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate><DataTemplate>
                   <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/>

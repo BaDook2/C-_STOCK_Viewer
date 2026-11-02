@@ -197,7 +197,8 @@ public static class Program
         Check(main.ActualWidth <= 286 && main.ActualHeight <= 80, "compact search window dimensions");
         Check(main.FindName("StatusText") is null && main.FindName("PopupCount") is null && main.FindName("DemoButton") is null,
             "search window has no status bar, counter or demo control");
-        Check(VisualChildren<Button>(main).Count(b => b.IsVisible) == 4, "only settings, minimize, close and search buttons");
+        Check(VisualChildren<Button>(main).Count(b => b.IsVisible) == 3 && main.FindName("SettingsButton") is null,
+            "only minimize, close and search buttons remain; no settings gear");
         var display = (CheckBox)main.FindName("DisplayName");
         var close = (Button)main.FindName("CloseButton");
         Check(Math.Abs(display.TranslatePoint(new Point(0, display.ActualHeight / 2), main).Y
@@ -264,6 +265,7 @@ public static class Program
         Check(replacement.StatusMessage.Contains("마지막 수신") && ((Border)replacement.FindName("Card")).Opacity < 1, "disconnection dims old data and explains in tooltip");
         var search = (TextBox)main.FindName("SearchBox"); main.Activate(); search.Focus(); search.Text = "삼성"; await Idle();
         Check(((ListBox)main.FindName("SearchResults")).Items.Count >= 3 && ((Popup)main.FindName("Suggestions")).IsOpen, "typing opens autocomplete dropdown");
+        Check(Mouse.Captured is null, "autocomplete does not capture the first click intended for the close button");
         Check(search.GetRectFromCharacterIndex(0).Height >= 12, "search text has a complete text line");
         SaveImage(main, "search-autocomplete.png");
         ((Popup)main.FindName("Suggestions")).IsOpen = false;
@@ -275,17 +277,18 @@ public static class Program
         main.WindowState = WindowState.Minimized; await Idle();
         Check(replacement.IsVisible && replacement.WindowState == WindowState.Normal, "minimizing search keeps independent price strip visible");
         main.WindowState = WindowState.Normal; await Idle();
-        var settings = new SettingsWindow("공개 시세 연결") { Owner = main }; settings.Show(); await Idle();
-        SaveImage(settings, "settings.png");
-        Check(!VisualChildren<PasswordBox>(settings).Any() && settings.FindName("AppKeyInput") is null && settings.FindName("SecretInput") is null,
-            "settings contain no API key fields");
-        settings.Close();
         second.ProcessRightClick(1); second.ProcessRightClick(2); await Idle();
         Check(!second.IsVisible && main.Popups.Count == 1, "double right click closes popup and removes its subscription");
         var ended = 0; main.SessionEnded += (_, _) => ended++;
-        main.Close(); await Idle();
+        main.Activate(); search.Focus(); search.Text = "삼성"; await Idle();
+        var mainHandle = new WindowInteropHelper(main).Handle;
+        Check(close.ClickMode == ClickMode.Press, "close button acts on the first press without waiting for mouse release");
+        close.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); await Idle();
         Check(!main.IsVisible && replacement.IsVisible && main.Popups.Count == 1 && ended == 0,
-            "closing search preserves its independent quote window and session");
+            "clicking X with autocomplete open closes search and preserves the fixed price popup");
+        Check(!IsWindow(mainHandle) && IsWindow(new WindowInteropHelper(replacement).Handle)
+            && !((Popup)main.FindName("Suggestions")).IsOpen,
+            "X destroys the native search window and autocomplete while retaining the price window");
         var lastQuote = replacement.LastQuote;
         await Until(() => !ReferenceEquals(lastQuote, replacement.LastQuote));
         Check(true, "quotes continue refreshing after the search window closes");
@@ -372,7 +375,7 @@ public static class Program
         var popup = main.Popups.Values.Single();
         Check(!opening.IsCompleted && main.IsEnabled && ((TextBox)main.FindName("SearchBox")).IsEnabled,
             "waiting for an initial quote does not disable the search window or textbox");
-        main.Close(); await Idle();
+        ((Button)main.FindName("CloseButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); await Idle();
         Check(popup.IsVisible && !service.Disposed && !service.SnapshotCancellation.IsCancellationRequested && ended == 0,
             "closing search during a pending snapshot keeps the quote service and request alive");
         service.Snapshot.SetResult(new("005930", 72500, 1.25m, DateTimeOffset.UtcNow));
@@ -388,9 +391,27 @@ public static class Program
         var empty = new MainWindow(store, false);
         var emptyService = new DelayedQuoteService();
         var emptyEnded = 0; empty.SessionEnded += (_, _) => emptyEnded++;
-        empty.Show(); await empty.UseServiceAsync(emptyService, DemoMarketData.SampleStocks); empty.Close();
+        empty.Show(); await empty.UseServiceAsync(emptyService, DemoMarketData.SampleStocks);
+        ((Button)empty.FindName("CloseButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         await Until(() => emptyEnded == 1);
         Check(emptyService.Disposed && !empty.IsVisible, "closing search without quote popups ends the app normally");
+
+        var pendingMain = new MainWindow(store, false);
+        var pendingService = new DelayedSearchService();
+        pendingMain.Show(); await pendingMain.UseServiceAsync(pendingService, DemoMarketData.SampleStocks);
+        var keptQuote = (await pendingMain.OpenStockAsync(DemoMarketData.SampleStocks[0]))!;
+        pendingMain.Activate();
+        var pendingBox = (TextBox)pendingMain.FindName("SearchBox"); pendingBox.Focus();
+        pendingBox.Text = "아직목록에없는종목";
+        await Until(() => pendingService.Requests.Count == 1);
+        ((Button)pendingMain.FindName("SearchButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        ((Button)pendingMain.FindName("CloseButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); await Idle();
+        pendingService.Requests[0].Reply.SetResult([]); await Idle();
+        var pendingDropdown = (Popup)pendingMain.FindName("Suggestions");
+        Check(!pendingMain.IsVisible && !pendingDropdown.IsOpen
+            && pendingDropdown.ReadLocalValue(Popup.IsOpenProperty) is false && keptQuote.IsVisible,
+            "a pending search submission cannot reopen any search popup after X closes the search window");
+        keptQuote.ProcessRightClick(2); await Idle();
     }
     private static async Task Until(Func<bool> condition)
     {
@@ -420,6 +441,7 @@ public static class Program
     { trnm = "REAL", data = new[] { new { type = "0B", item = code, values = new Dictionary<string, string> { ["10"] = price, ["12"] = percent, ["20"] = "091501" } } } });
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 
     private sealed class DelayedQuoteService : IMarketDataService
