@@ -17,7 +17,8 @@ public partial class MainWindow : Window
     private ConnectionStatus connection = new("공개 시세 연결 대기 · API 키 불필요");
     private CancellationTokenSource? searchCancellation;
     private Task? pendingSearch;
-    private bool suppressSearch, closing, initialized;
+    private bool suppressSearch, closing, initialized, searchClosed;
+    public event EventHandler? SessionEnded;
     public IReadOnlyDictionary<string, QuoteWindow> Popups => popups;
     public string StatusMessage => connection.Message;
     public MainWindow(SettingsStore? store = null, bool autoConnect = true)
@@ -45,16 +46,26 @@ public partial class MainWindow : Window
     }
     private async void OnClosed(object? sender, EventArgs e)
     {
-        closing = true; lifetime.Cancel(); session.Cancel(); Suggestions.IsOpen = false;
+        searchClosed = true; Suggestions.IsOpen = false;
         CancelPendingSearch();
-        foreach (var window in popups.Values.ToArray()) window.Close();
-        if (service is not null) await service.DisposeAsync();
-        session.Dispose(); lifetime.Dispose();
+        if (popups.Count == 0) await EndSessionAsync();
+    }
+    private async Task EndSessionAsync()
+    {
+        if (closing) return;
+        closing = true; lifetime.Cancel(); session.Cancel();
+        try { if (service is not null) await service.DisposeAsync(); }
+        finally
+        {
+            session.Dispose(); lifetime.Dispose();
+            SessionEnded?.Invoke(this, EventArgs.Empty);
+        }
     }
     private async Task UsePublicServiceAsync()
     {
         var client = new PublicMarketData();
         await UseServiceAsync(client, stocks);
+        if (closing || searchClosed) return;
         _ = RefreshPublicCatalogAsync(client, session.Token);
     }
     private async Task RefreshPublicCatalogAsync(IMarketDataService client, CancellationToken cancellation)
@@ -62,7 +73,7 @@ public partial class MainWindow : Window
         try
         {
             var catalog = await client.GetStocksAsync(cancellation);
-            if (closing || !ReferenceEquals(service, client)) return;
+            if (closing || searchClosed || !ReferenceEquals(service, client)) return;
             stocks = catalog.Concat(stocks).DistinctBy(s => s.Code).ToArray();
             settings.SaveCatalog(stocks);
             RefreshSuggestions();
@@ -73,6 +84,7 @@ public partial class MainWindow : Window
     }
     public async Task UseServiceAsync(IMarketDataService client, IReadOnlyList<Stock> catalog)
     {
+        if (closing) { await client.DisposeAsync(); return; }
         CancelPendingSearch();
         session.Cancel(); session.Dispose(); session = new CancellationTokenSource();
         var previous = service; service = client; stocks = catalog;
@@ -114,7 +126,7 @@ public partial class MainWindow : Window
     }
     public async Task<QuoteWindow?> OpenStockAsync(Stock stock)
     {
-        if (closing) return null;
+        if (closing || searchClosed) return null;
         if (!popups.ContainsKey(stock.Code) && popups.Count >= 200)
         { ShowStatus(new("동시에 최대 200개 종목까지 표시할 수 있어요.", connection.Connected, connection.IsDemo)); return null; }
         if (popups.Remove(stock.Code, out var old)) old.Close();
@@ -123,15 +135,19 @@ public partial class MainWindow : Window
         popup.Closed += async (_, _) =>
         {
             if (popups.TryGetValue(stock.Code, out var current) && ReferenceEquals(current, popup))
-            { popups.Remove(stock.Code); await UpdateSubscriptionsAsync(); }
+            {
+                popups.Remove(stock.Code);
+                if (searchClosed && popups.Count == 0) await EndSessionAsync();
+                else await UpdateSubscriptionsAsync();
+            }
         };
         popup.SetConnection(connection);
         // Layout before Show prevents an initial flash at the screen origin.
         popup.Measure(new Size(double.PositiveInfinity, popup.Height));
         popup.Left = Left + (ActualWidth - popup.DesiredSize.Width) / 2;
-        popup.Top = Top + (ActualHeight - popup.DesiredSize.Height) / 2;
-        popup.ContentRendered += (_, _) => PopupPlacement.Center(popup, this);
-        popup.Show(); PopupPlacement.Center(popup, this);
+        popup.Top = Top + ActualHeight + 4;
+        popup.ContentRendered += (_, _) => { if (!searchClosed && popup.IsVisible) PopupPlacement.BelowSearch(popup, this); };
+        popup.Show(); PopupPlacement.BelowSearch(popup, this);
         Suggestions.IsOpen = false;
         await UpdateSubscriptionsAsync();
         if (service is { } currentService) await LoadQuoteAsync(popup, currentService, session.Token);
@@ -162,7 +178,7 @@ public partial class MainWindow : Window
     }
     private void RefreshSuggestions()
     {
-        if (!initialized) return;
+        if (!initialized || searchClosed || closing) return;
         SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         CancelPendingSearch();
         var found = StockSearch.Find(stocks, SearchBox.Text);
@@ -182,7 +198,7 @@ public partial class MainWindow : Window
         {
             await Task.Delay(250, cancellation);
             var results = await remote.SearchAsync(query, cancellation);
-            if (closing || cancellation.IsCancellationRequested || !ReferenceEquals(service, remote) || SearchBox.Text != query) return;
+            if (closing || searchClosed || cancellation.IsCancellationRequested || !ReferenceEquals(service, remote) || SearchBox.Text != query) return;
             var selectedCode = (SearchResults.SelectedItem as Stock)?.Code;
             stocks = results.Concat(stocks).DistinctBy(s => s.Code).ToArray();
             var matches = results.Concat(StockSearch.Find(stocks, query)).DistinctBy(s => s.Code).Take(12).ToArray();

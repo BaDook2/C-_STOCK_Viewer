@@ -6,14 +6,14 @@ namespace StockViewer.App;
 
 public static class PopupPlacement
 {
-    /// <summary>Center on the search window; constrain to its monitor's available desktop.</summary>
-    public static void Center(Window popup, Window search)
+    /// <summary>Place below the search window, or above when the monitor has no room below.</summary>
+    public static void BelowSearch(Window popup, Window search)
     {
         popup.UpdateLayout();
         var width = popup.ActualWidth > 0 ? popup.ActualWidth : popup.DesiredSize.Width;
         var height = popup.ActualHeight > 0 ? popup.ActualHeight : popup.DesiredSize.Height;
         var left = search.Left + (search.ActualWidth - width) / 2;
-        var top = search.Top + (search.ActualHeight - height) / 2;
+        var top = search.Top + search.ActualHeight + 4;
         var handle = new WindowInteropHelper(search).Handle;
         var monitor = MonitorFromWindow(handle, 2);
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
@@ -22,6 +22,7 @@ public static class PopupPlacement
             var matrix = target.TransformFromDevice;
             var start = matrix.Transform(new Point(info.Work.Left, info.Work.Top));
             var end = matrix.Transform(new Point(info.Work.Right, info.Work.Bottom));
+            if (top + height > end.Y) top = search.Top - height - 4;
             left = Math.Clamp(left, start.X, Math.Max(start.X, end.X - width));
             top = Math.Clamp(top, start.Y, Math.Max(start.Y, end.Y - height));
         }

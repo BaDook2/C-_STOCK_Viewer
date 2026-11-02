@@ -10,7 +10,7 @@
             <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
           </Button>
           <Button Style="{StaticResource IconButton}" Width="24" Height="22" Click="Minimize" ToolTip="최소화" AutomationProperties.Name="최소화"><TextBlock Text="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="9"/></Button>
-          <Button x:Name="CloseButton" Style="{StaticResource IconButton}" Width="24" Height="22" Click="CloseApp" ToolTip="모든 가격 팝업과 함께 종료" AutomationProperties.Name="종료"><TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="9"/></Button>
+          <Button x:Name="CloseButton" Style="{StaticResource IconButton}" Width="24" Height="22" Click="CloseApp" ToolTip="검색창 닫기 · 가격 팝업은 유지" AutomationProperties.Name="검색창 닫기"><TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="9"/></Button>
         </StackPanel>
       </Grid>
       <Grid Grid.Row="2">

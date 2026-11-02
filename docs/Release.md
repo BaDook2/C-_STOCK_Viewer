@@ -4,14 +4,16 @@
 
 v1.0.1은 검색어를 전부 지운 뒤 새 종목을 입력하거나 검색창에 다시 포커스를 줄 때 종료되는 문제를 수정합니다. v1.0.0을 사용 중이면 EXE를 새 버전으로 교체하세요.
 
+v1.0.2는 가격 팝업을 검색 창 아래(공간 부족 시 위)에 배치해 입력칸을 가리지 않게 합니다. 검색 창의 X는 가격 팝업을 유지하며, 마지막 가격 팝업을 닫으면 시세 연결을 정리하고 종료합니다.
+
 ## 새 버전 배포
 
 변경 사항을 main에 커밋·푸시한 뒤 새 버전 태그를 올립니다. 예:
 
 ```powershell
 git push origin main
-git tag -a v1.0.2 -m "Release v1.0.2"
-git push origin v1.0.2
+git tag -a v1.0.3 -m "Release v1.0.3"
+git push origin v1.0.3
 ```
 
 `v숫자.숫자.숫자` 형식만 지원합니다. 이미 게시한 버전은 수정하거나 덮어쓰지 않고 다음 버전 번호를 사용합니다.
@@ -25,8 +27,8 @@ GitHub가 자동 발급하는 GITHUB_TOKEN을 사용하므로 별도 PAT나 증�
 ## 같은 방식으로 로컬 게시
 
 ```powershell
-./Publish.ps1 -Version 1.0.1
-./Publish.ps1 -Version 1.0.1 -OutputDirectory artifacts/release -SkipRootCopy
+./Publish.ps1 -Version 1.0.2
+./Publish.ps1 -Version 1.0.2 -OutputDirectory artifacts/release -SkipRootCopy
 ```
 
 기본 호출은 publish에 만든 EXE를 프로젝트 루트에도 복사합니다. SkipRootCopy는 실행 중인 루트 EXE를 건드리지 않고 별도 경로에 게시할 때 사용합니다. WPF는 트리밍하지 않으며 런타임·네이티브 라이브러리를 단일 EXE에 포함하고 압축합니다.

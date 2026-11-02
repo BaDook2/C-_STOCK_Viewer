@@ -34,7 +34,7 @@ public static class Program
             try
             {
                 if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UiTests(); await SearchInputTests(); }
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UiTests(); await SearchInputTests(); await WindowLifetimeTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -210,7 +210,12 @@ public static class Program
         Check(first.LastQuote?.IsDemo == true && first.StatusMessage.Contains("DEMO"), "sample prices identified in tooltip");
         Check(!first.NameVisible, "unchecked preference hides name and code");
         Check(Math.Abs(first.Left + first.ActualWidth / 2 - (main.Left + main.ActualWidth / 2)) < 2
-            && Math.Abs(first.Top + first.ActualHeight / 2 - (main.Top + main.ActualHeight / 2)) < 2, "popup centered on search window");
+            && first.Top >= main.Top + main.ActualHeight, "new price popup leaves the search input uncovered immediately");
+        var previousTop = main.Top;
+        main.Top = SystemParameters.WorkArea.Bottom - main.ActualHeight;
+        PopupPlacement.BelowSearch(first, main);
+        Check(first.Top + first.ActualHeight <= main.Top, "price popup uses space above search at the bottom of the screen");
+        main.Top = previousTop; PopupPlacement.BelowSearch(first, main);
         display.IsChecked = true; display.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         Check(!first.NameVisible, "changing checkbox does not alter an existing hidden-name popup");
         var second = (await main.OpenStockAsync(DemoMarketData.SampleStocks[1]))!; await Idle();
@@ -277,7 +282,16 @@ public static class Program
         settings.Close();
         second.ProcessRightClick(1); second.ProcessRightClick(2); await Idle();
         Check(!second.IsVisible && main.Popups.Count == 1, "double right click closes popup and removes its subscription");
-        main.Close(); await Idle(); Check(!replacement.IsVisible && main.Popups.Count == 0, "main close closes all quote windows");
+        var ended = 0; main.SessionEnded += (_, _) => ended++;
+        main.Close(); await Idle();
+        Check(!main.IsVisible && replacement.IsVisible && main.Popups.Count == 1 && ended == 0,
+            "closing search preserves its independent quote window and session");
+        var lastQuote = replacement.LastQuote;
+        await Until(() => !ReferenceEquals(lastQuote, replacement.LastQuote));
+        Check(true, "quotes continue refreshing after the search window closes");
+        replacement.ProcessRightClick(2);
+        await Until(() => ended == 1);
+        Check(main.Popups.Count == 0 && !replacement.IsVisible, "closing the last quote ends the session once");
     }
     private static async Task SearchInputTests()
     {
@@ -346,6 +360,38 @@ public static class Program
         search.Text = ""; await Idle(); main.Close(); await Idle();
         Check(!main.IsVisible, "closing immediately after clearing an active remote query does not cancel a disposed source");
     }
+    private static async Task WindowLifetimeTests()
+    {
+        var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-lifetime-" + Guid.NewGuid().ToString("N")));
+        var main = new MainWindow(store, false);
+        var service = new DelayedQuoteService();
+        var ended = 0; main.SessionEnded += (_, _) => ended++;
+        main.Show(); await main.UseServiceAsync(service, DemoMarketData.SampleStocks);
+        var opening = main.OpenStockAsync(DemoMarketData.SampleStocks[0]);
+        await Until(() => main.Popups.Count == 1 && service.SnapshotRequested);
+        var popup = main.Popups.Values.Single();
+        Check(!opening.IsCompleted && main.IsEnabled && ((TextBox)main.FindName("SearchBox")).IsEnabled,
+            "waiting for an initial quote does not disable the search window or textbox");
+        main.Close(); await Idle();
+        Check(popup.IsVisible && !service.Disposed && !service.SnapshotCancellation.IsCancellationRequested && ended == 0,
+            "closing search during a pending snapshot keeps the quote service and request alive");
+        service.Snapshot.SetResult(new("005930", 72500, 1.25m, DateTimeOffset.UtcNow));
+        await opening;
+        Check(popup.DisplayedPrice == "72,500원", "a pending price lookup completes after the search window is closed");
+        service.Publish(new("005930", 73000, 1.5m, DateTimeOffset.UtcNow));
+        await Until(() => popup.DisplayedPrice == "73,000원");
+        Check(true, "live quote events still reach a popup after search closes");
+        popup.ProcessRightClick(2); await Until(() => ended == 1);
+        Check(service.Disposed && service.SnapshotCancellation.IsCancellationRequested && main.Popups.Count == 0,
+            "closing the final quote cancels requests and disposes the market service before ending the app");
+
+        var empty = new MainWindow(store, false);
+        var emptyService = new DelayedQuoteService();
+        var emptyEnded = 0; empty.SessionEnded += (_, _) => emptyEnded++;
+        empty.Show(); await empty.UseServiceAsync(emptyService, DemoMarketData.SampleStocks); empty.Close();
+        await Until(() => emptyEnded == 1);
+        Check(emptyService.Disposed && !empty.IsVisible, "closing search without quote popups ends the app normally");
+    }
     private static async Task Until(Func<bool> condition)
     {
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(6));
@@ -376,6 +422,24 @@ public static class Program
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 
+    private sealed class DelayedQuoteService : IMarketDataService
+    {
+        public bool IsDemo => true;
+        public bool Disposed { get; private set; }
+        public bool SnapshotRequested { get; private set; }
+        public CancellationToken SnapshotCancellation { get; private set; }
+        public TaskCompletionSource<Quote> Snapshot { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public event Action<Quote>? QuoteReceived;
+        public event Action<ConnectionStatus>? StatusChanged;
+        public void Start() => StatusChanged?.Invoke(new("fixture", true, true));
+        public void Publish(Quote quote) => QuoteReceived?.Invoke(quote);
+        public Task<IReadOnlyList<Stock>> GetStocksAsync(CancellationToken cancellation = default)
+            => Task.FromResult<IReadOnlyList<Stock>>(DemoMarketData.SampleStocks);
+        public Task<Quote> GetSnapshotAsync(string code, CancellationToken cancellation = default)
+        { SnapshotRequested = true; SnapshotCancellation = cancellation; return Snapshot.Task.WaitAsync(cancellation); }
+        public Task SetSubscriptionsAsync(IEnumerable<string> codes, CancellationToken cancellation = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+    }
     private sealed class DelayedSearchService : IMarketDataService, IStockSearchService
     {
         public List<(string Query, TaskCompletionSource<IReadOnlyList<Stock>> Reply)> Requests { get; } = [];

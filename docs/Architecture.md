@@ -14,4 +14,8 @@ Quote는 공개 제공처·기준 시각·장 상태를 보존합니다. 종목�
 
 우클릭은 WPF MouseButtonEventArgs.ClickCount를 사용합니다. 첫 클릭은 고정 토글, 두 번째 클릭은 닫기입니다. 고정 위치는 WM_WINDOWPOSCHANGING에서 SWP_NOMOVE를 설정해 시스템 이동도 막습니다.
 
+검색 창의 Closed는 검색 작업과 자동완성만 정리합니다. 가격 창이 남아 있으면 공통 서비스·구독·시세 Dispatcher 처리는 계속 유지합니다. 검색 창이 닫힌 상태에서 마지막 가격 창이 닫히면 EndSessionAsync가 요청을 취소하고 서비스를 Dispose한 뒤 SessionEnded를 알립니다. App은 OnExplicitShutdown으로 실행하며 이 알림을 받은 뒤 종료합니다. 가격 창이 없는 검색 창을 닫는 경우에도 같은 종료 경로를 사용합니다.
+
+가격 창은 PopupPlacement.BelowSearch로 검색 창 아래에 가로 중앙 정렬하며 화면 하단에서는 위쪽으로 배치합니다. 초기 위치부터 입력칸을 덮지 않도록 Measure 뒤 좌표를 설정합니다.
+
 디자인 기준은 사용자의 기존 STOCK/Stock.App/Styles/TossInspired.xaml입니다. 검색 창 286×80 DIP, 가격 창 높이 32 DIP를 유지하고 가격 팝업에는 별도 버튼과 메뉴를 표시하지 않습니다.
