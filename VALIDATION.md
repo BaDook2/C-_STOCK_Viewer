@@ -106,3 +106,7 @@
 - 실제 미국 응답의 시장 상태는 PREOPEN, pollingInterval은 70초였음. 장중 1~2초 체결 반영과 주간/24시간 전체 거래 지원은 검증하거나 보장하지 않음.
 - artifacts/ui/quote-us-named.png 및 quote-us-price-only.png를 렌더링하고 직접 확인함. 미국 팝업은 종목명·달러 가격·등락률을 한 줄로 표시하고 이름을 숨기면 너비가 줄어듦.
 - 로컬 v1.1.0 self-contained 단일 파일 게시 성공. EXE만 복사한 별도 폴더에서 인접 DLL·런타임 없이 5초 이상 시작 상태를 유지함을 확인하고 테스트 프로세스만 종료함.
+- v1.1.0 Release 게시 완료: https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v1.1.0
+- Actions 성공: https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/41414406246. 동일 커밋의 Windows 빌드·오프라인 회귀 검증·EXE 단독 시작 확인과 Release 첨부가 통과함.
+- 실제 Release 첨부 EXE를 내려받아 GitHub digest·파일 크기·버전과 일치함을 확인함. EXE만 있는 폴더에서 다시 5초 시작 확인을 통과하고 프로젝트 루트·publish 실행 파일도 같은 파일로 교체함. 크기 64944653 bytes, 버전 1.1.0+3213b176ecd27074fdbf538e6ee74cc5ebbd9401.
+- SHA256: FD2255BF45B5DC5E6EA67BECAF16FF484FE6BC2CFD88B6A16C0C4063AAFAEEE3.
