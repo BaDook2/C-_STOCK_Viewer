@@ -10,6 +10,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
+using System.Windows.Input;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -32,7 +34,7 @@ public static class Program
             try
             {
                 if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UiTests(); }
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UiTests(); await SearchInputTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -277,6 +279,73 @@ public static class Program
         Check(!second.IsVisible && main.Popups.Count == 1, "double right click closes popup and removes its subscription");
         main.Close(); await Idle(); Check(!replacement.IsVisible && main.Popups.Count == 0, "main close closes all quote windows");
     }
+    private static async Task SearchInputTests()
+    {
+        var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-input-" + Guid.NewGuid().ToString("N")));
+        var main = new MainWindow(store, false);
+        var remote = new DelayedSearchService();
+        main.Show(); await main.UseServiceAsync(remote, DemoMarketData.SampleStocks);
+        main.Activate();
+        var search = (TextBox)main.FindName("SearchBox");
+        var results = (ListBox)main.FindName("SearchResults");
+        var suggestions = (Popup)main.FindName("Suggestions");
+        search.Focus(); await Idle();
+
+        search.Text = "삼성";
+        await Until(() => remote.Requests.Count == 1);
+        remote.Requests[0].Reply.SetResult([DemoMarketData.SampleStocks[0]]); await Idle();
+        foreach (var query in new[] { "큐리", "삼성전자", "NAVER", "005930", "SK하이닉스", "한화에어로스페이스" })
+        {
+            // The released app crashed here: clearing disposed searchCancellation,
+            // but the next TextChanged/GotKeyboardFocus tried to cancel it again.
+            search.SelectAll(); EditingCommands.Backspace.Execute(null, search); await Idle();
+            Check(search.Text.Length == 0 && !suggestions.IsOpen, $"clearing the previous remote query is safe before {query}");
+            ((Button)main.FindName("SearchButton")).Focus(); search.Focus(); await Idle();
+            foreach (var letter in query)
+                TextCompositionManager.StartComposition(new TextComposition(InputManager.Current, search, letter.ToString()));
+            await Idle();
+            Check(search.Text == query && search.IsKeyboardFocused, $"typing after clear and refocus preserves the full query: {query}");
+        }
+
+        // A whitespace query also disposes the previous search without replacing it.
+        search.Text = " "; await Idle(); search.Text = "큐리";
+        var requestCount = remote.Requests.Count;
+        await Until(() => remote.Requests.Count > requestCount);
+        remote.Requests[^1].Reply.SetResult([new("115180", "큐리언트", "KOSDAQ"), new("445680", "큐리옥스바이오시스템즈", "KOSDAQ")]);
+        await Until(() => results.Items.Count == 2);
+        Check(search.Text == "큐리" && suggestions.IsOpen, "remote Quri autocomplete survives an empty/whitespace query");
+        search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search), Environment.TickCount, Key.Down)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search), Environment.TickCount, Key.Enter)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        await Until(() => main.Popups.Count == 1);
+        Check(main.Popups.ContainsKey("445680"), "Enter opens the selected Quri remote result after repeated clears");
+        main.Popups.Values.Single().Close(); main.Activate(); search.Focus();
+
+        search.Text = "없는종목";
+        requestCount = remote.Requests.Count;
+        await Until(() => remote.Requests.Count > requestCount);
+        remote.Requests[^1].Reply.SetResult([]); await Idle();
+        Check(results.Items.Count == 0 && results.SelectedIndex == -1, "an empty remote reply keeps no invalid selection");
+        search.Text = "네트워크오류";
+        requestCount = remote.Requests.Count;
+        await Until(() => remote.Requests.Count > requestCount);
+        remote.Requests[^1].Reply.SetException(new IOException("fixture network failure")); await Idle();
+
+        search.Text = "큐";
+        requestCount = remote.Requests.Count;
+        await Until(() => remote.Requests.Count > requestCount);
+        var oldReply = remote.Requests[^1].Reply;
+        search.Text = "큐리";
+        requestCount = remote.Requests.Count;
+        await Until(() => remote.Requests.Count > requestCount);
+        oldReply.SetResult([new("000270", "기아", "KOSPI")]); await Idle();
+        Check(!results.Items.Cast<Stock>().Any(s => s.Code == "000270"), "a canceled delayed reply cannot overwrite the new query");
+        remote.Requests[^1].Reply.SetResult([new("115180", "큐리언트", "KOSDAQ")]); await Idle();
+        Check(search.Text == "큐리" && results.Items.Cast<Stock>().Any(s => s.Code == "115180"), "search remains usable after an empty reply, network error and canceled reply");
+        search.Text = ""; await Idle(); main.Close(); await Idle();
+        Check(!main.IsVisible, "closing immediately after clearing an active remote query does not cancel a disposed source");
+    }
     private static async Task Until(Func<bool> condition)
     {
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(6));
@@ -307,6 +376,30 @@ public static class Program
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 
+    private sealed class DelayedSearchService : IMarketDataService, IStockSearchService
+    {
+        public List<(string Query, TaskCompletionSource<IReadOnlyList<Stock>> Reply)> Requests { get; } = [];
+        public bool IsDemo => true;
+        public event Action<Quote>? QuoteReceived { add { } remove { } }
+        public event Action<ConnectionStatus>? StatusChanged;
+        public void Start() => StatusChanged?.Invoke(new("fixture", true, true));
+        public Task<IReadOnlyList<Stock>> GetStocksAsync(CancellationToken cancellation = default)
+            => Task.FromResult<IReadOnlyList<Stock>>(DemoMarketData.SampleStocks);
+        public Task<Quote> GetSnapshotAsync(string code, CancellationToken cancellation = default)
+            => Task.FromResult(new Quote(code, 72500, 1.25m, DateTimeOffset.UtcNow, IsDemo: true));
+        public Task SetSubscriptionsAsync(IEnumerable<string> codes, CancellationToken cancellation = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Stock>> SearchAsync(string query, CancellationToken cancellation = default)
+        {
+            // Ignore cancellation to exercise replies already in flight.
+            var reply = new TaskCompletionSource<IReadOnlyList<Stock>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Requests.Add((query, reply)); return reply.Task;
+        }
+        public ValueTask DisposeAsync()
+        {
+            foreach (var request in Requests) request.Reply.TrySetCanceled();
+            return ValueTask.CompletedTask;
+        }
+    }
     private sealed class PublicHttpFixture : HttpMessageHandler
     {
         public int QuoteRequests, LastBatchSize;

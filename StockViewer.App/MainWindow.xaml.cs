@@ -46,7 +46,7 @@ public partial class MainWindow : Window
     private async void OnClosed(object? sender, EventArgs e)
     {
         closing = true; lifetime.Cancel(); session.Cancel(); Suggestions.IsOpen = false;
-        searchCancellation?.Cancel();
+        CancelPendingSearch();
         foreach (var window in popups.Values.ToArray()) window.Close();
         if (service is not null) await service.DisposeAsync();
         session.Dispose(); lifetime.Dispose();
@@ -73,6 +73,7 @@ public partial class MainWindow : Window
     }
     public async Task UseServiceAsync(IMarketDataService client, IReadOnlyList<Stock> catalog)
     {
+        CancelPendingSearch();
         session.Cancel(); session.Dispose(); session = new CancellationTokenSource();
         var previous = service; service = client; stocks = catalog;
         if (previous is not null) await previous.DisposeAsync();
@@ -148,11 +149,22 @@ public partial class MainWindow : Window
         catch (Exception e) when (e is IOException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
         { if (!closing && ReferenceEquals(service, client) && popups.TryGetValue(popup.Stock.Code, out var current) && ReferenceEquals(current, popup)) popup.ShowError("시세 조회 실패 · 설정과 네트워크를 확인해 주세요"); }
     }
+    private void CancelPendingSearch()
+    {
+        var previous = searchCancellation;
+        searchCancellation = null;
+        pendingSearch = null;
+        // Empty queries do not create a replacement. Clear the field before
+        // disposing so the next input/focus event cannot cancel a disposed CTS.
+        if (previous is null) return;
+        previous.Cancel();
+        previous.Dispose();
+    }
     private void RefreshSuggestions()
     {
         if (!initialized) return;
         SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        searchCancellation?.Cancel(); searchCancellation?.Dispose();
+        CancelPendingSearch();
         var found = StockSearch.Find(stocks, SearchBox.Text);
         SearchResults.ItemsSource = found; SearchResults.SelectedIndex = found.Length == 0 ? -1 : 0;
         NoResults.Visibility = found.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -175,7 +187,7 @@ public partial class MainWindow : Window
             stocks = results.Concat(stocks).DistinctBy(s => s.Code).ToArray();
             var matches = results.Concat(StockSearch.Find(stocks, query)).DistinctBy(s => s.Code).Take(12).ToArray();
             SearchResults.ItemsSource = matches;
-            SearchResults.SelectedIndex = Math.Max(0, Array.FindIndex(matches, s => s.Code == selectedCode));
+            SearchResults.SelectedIndex = matches.Length == 0 ? -1 : Math.Max(0, Array.FindIndex(matches, s => s.Code == selectedCode));
             NoResults.Visibility = matches.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -198,7 +210,7 @@ public partial class MainWindow : Window
     }
     private async Task SelectAndOpenAsync(Stock stock)
     {
-        searchCancellation?.Cancel();
+        CancelPendingSearch();
         suppressSearch = true; SearchBox.Text = stock.Name; SearchBox.CaretIndex = SearchBox.Text.Length; suppressSearch = false;
         SearchPlaceholder.Visibility = Visibility.Collapsed; Suggestions.IsOpen = false;
         await OpenStockAsync(stock);

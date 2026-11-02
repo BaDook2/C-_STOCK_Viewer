@@ -24,3 +24,12 @@
 - 첨부 SHA256과 Release 본문 체크섬 일치: 1D9C44FA3A32DC368BB8AA1AC81783DFC61DB82BD69B5999E5BB924363349989
 - 최신 EXE 직접 다운로드 주소 HTTP 200 확인: https://github.com/BaDook2/C-_STOCK_Viewer/releases/latest/download/StockViewer.exe
 - 배포 워크플로·게시 스크립트·버전 태그 사용 방법은 docs/Release.md에 기록함.
+
+## 검색어 재입력 충돌 수정 · 2026-11-02
+
+- GitHub v1.0.0의 실제 StockViewer.exe를 내려받아 기존 SHA256과 일치함을 확인한 후 실행함.
+- 재현: 검색어 입력 → Ctrl+A → Backspace로 전부 삭제 → `큐리` 재입력. 실제 EXE가 종료되었고 Windows .NET Runtime 로그에 `ObjectDisposedException` / `MainWindow.RefreshSuggestions` 155행 / `CancellationTokenSource.Cancel()`이 기록됨. 2글자 제한이나 특정 종목의 공개 검색 응답 오류가 아님.
+- 원인: 빈 검색어에서 취소 객체를 Dispose한 뒤 필드 참조를 남겨 다음 입력·포커스 이벤트·종료에서 다시 Cancel함.
+- 수정: CancelPendingSearch에서 참조와 대기 작업을 먼저 비운 뒤 한 번만 Cancel/Dispose. 입력 갱신·종목 선택·서비스 전환·종료에서 같은 정리를 사용함. 빈 원격 응답의 선택 인덱스도 -1로 유지함.
+- Release 빌드 경고 0 / 오류 0. 오프라인 검증 107개 통과.
+- 새 회귀 검증: 삼성 검색 후 삭제·포커스 이동·큐리/삼성전자/NAVER/005930/SK하이닉스/한화에어로스페이스 재입력, 공백 검색 뒤 재입력, 큐리 원격 자동완성과 Enter로 팝업 열기, 빈 결과, 네트워크 실패 후 복구, 취소된 응답 무시, 검색어 삭제 직후 종료.

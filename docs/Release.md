@@ -2,14 +2,16 @@
 
 일반 사용자는 [최신 StockViewer.exe](https://github.com/BaDook2/C-_STOCK_Viewer/releases/latest/download/StockViewer.exe) 하나만 다운로드해 실행합니다. 소스 코드 ZIP, DLL, .NET 설치, 증권사 API 키는 필요 없습니다. Windows x64용이며 공개 시세를 조회하므로 인터넷은 필요합니다.
 
+v1.0.1은 검색어를 전부 지운 뒤 새 종목을 입력하거나 검색창에 다시 포커스를 줄 때 종료되는 문제를 수정합니다. v1.0.0을 사용 중이면 EXE를 새 버전으로 교체하세요.
+
 ## 새 버전 배포
 
 변경 사항을 main에 커밋·푸시한 뒤 새 버전 태그를 올립니다. 예:
 
 ```powershell
 git push origin main
-git tag -a v1.0.1 -m "Release v1.0.1"
-git push origin v1.0.1
+git tag -a v1.0.2 -m "Release v1.0.2"
+git push origin v1.0.2
 ```
 
 `v숫자.숫자.숫자` 형식만 지원합니다. 이미 게시한 버전은 수정하거나 덮어쓰지 않고 다음 버전 번호를 사용합니다.
