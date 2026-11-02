@@ -76,3 +76,8 @@
 - Fix/Free 각각의 시작 상태에서 단일 클릭 전환·Up 소비·캡처 해제, 두 번째 Down 직후 창/네이티브 HWND와 GetCapture 유지, 두 번째 Up 처리 직후 창 유지, 다음 Dispatcher 단계에서 HWND 제거와 캡처 해제를 확인함. 기존 코드에서는 Up 소비 검증이 실패함을 먼저 확인함.
 - 테스트의 기존 우클릭 호출도 Down/Up 쌍으로 변경함. 검색 창을 닫은 뒤 마지막 가격 팝업 종료 시 시세 서비스 정리까지 기존 회귀 검증이 통과함.
 - 수동 확인용 테스트 창은 `dotnet StockViewer.Tests/bin/Release/net10.0-windows/StockViewer.Tests.dll --right-click-check`로 열 수 있음. 팝업 뒤의 Up 수신 수·메뉴 열림 수와 닫을 때 버튼이 눌린 상태였는지를 표시함. 컴퓨터 사용 도구는 오른쪽 더블클릭을 직접 지원하지 않아, 버튼 수명과 두 번째 Up 종료는 위 WPF/Win32 회귀 검증으로 확인함.
+- 실제 마우스 단일 우클릭을 가격 팝업에 보낸 후 뒤쪽 창의 Up·메뉴 열림 수가 0을 유지함을 확인함. 뒤쪽 테스트 창에 별도로 우클릭하면 Up·메뉴 열림이 각각 1이 되어 일반 우클릭 메뉴가 유지됨도 확인함.
+- v1.0.4 Release 게시 완료: https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v1.0.4
+- Actions 성공: https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/41401077348. Windows 러너에서 129개 검증과 단일 EXE 실행 확인을 통과함.
+- 실제 첨부 EXE를 내려받아 GitHub digest와 체크섬이 일치함을 확인하고 프로젝트 루트·publish EXE를 교체함. 크기 64942137 bytes, 버전 1.0.4+f416f46644597d56b9f8feea5d3081731f8b51a5.
+- SHA256: 7FF99E6963B94B8F11A54F552F62CA634974179496BD35F64EF3B5B705337E80.
