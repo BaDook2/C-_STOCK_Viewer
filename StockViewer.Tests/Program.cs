@@ -35,7 +35,7 @@ public static class Program
             {
                 if (args.Contains("--right-click-check")) await RightClickCheck();
                 else if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await RightClickReleaseTests(); await UiTests(); await SearchInputTests(); await WindowLifetimeTests(); }
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await RightClickReleaseTests(); await UiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -281,8 +281,9 @@ public static class Program
         RightClick(second, 1); RightClick(second, 2); await Idle();
         Check(!second.IsVisible && main.Popups.Count == 1, "double right click closes popup and removes its subscription");
         var ended = 0; main.SessionEnded += (_, _) => ended++;
-        main.Activate(); search.Focus(); search.Text = "삼성"; await Idle();
+        main.Activate(); search.Focus(); search.Text = ""; search.Text = "삼성"; await Idle();
         var mainHandle = new WindowInteropHelper(main).Handle;
+        Check(((Popup)main.FindName("Suggestions")).IsOpen, "autocomplete is open before the close-button regression check");
         Check(close.ClickMode == ClickMode.Press, "close button acts on the first press without waiting for mouse release");
         close.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); await Idle();
         Check(!main.IsVisible && replacement.IsVisible && main.Popups.Count == 1 && ended == 0,
@@ -296,6 +297,50 @@ public static class Program
         RightClick(replacement, 2);
         await Until(() => ended == 1);
         Check(main.Popups.Count == 0 && !replacement.IsVisible, "closing the last quote ends the session once");
+    }
+    private static async Task AutocompleteFocusTests()
+    {
+        var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-focus-" + Guid.NewGuid().ToString("N")));
+        var main = new MainWindow(store, false);
+        var remote = new DelayedSearchService();
+        main.Show(); await main.UseServiceAsync(remote, DemoMarketData.SampleStocks);
+        main.Activate();
+        var search = (TextBox)main.FindName("SearchBox");
+        var dropdown = (Popup)main.FindName("Suggestions");
+        var submit = (Button)main.FindName("SearchButton");
+        search.Focus(); search.Text = "삼성";
+        await Until(() => remote.Requests.Count == 1);
+        remote.Requests[0].Reply.SetResult([DemoMarketData.SampleStocks[0]]); await Idle();
+        Check(dropdown.IsOpen, "typing intentionally opens autocomplete before selecting a quote");
+        submit.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Until(() => main.Popups.Count == 1);
+        var popup = main.Popups.Values.Single();
+        RightClick(popup, 1); RightClick(popup, 2);
+        await Until(() => main.Popups.Count == 0);
+        main.Activate(); search.Focus(); await Idle();
+        Check(!dropdown.IsOpen && search.Text == "삼성전자",
+            "closing a quote by right-click does not reopen autocomplete when search focus returns");
+        submit.Focus(); search.Focus(); await Idle();
+        Check(!dropdown.IsOpen && remote.Requests.Count == 1,
+            "focus restoration alone neither opens autocomplete nor starts another search");
+
+        search.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+            { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent }); await Idle();
+        Check(dropdown.IsOpen, "an intentional left click in search still opens existing suggestions");
+        search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search), Environment.TickCount, Key.Escape)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        await Until(() => remote.Requests.Count == 2);
+        remote.Requests[1].Reply.SetResult([DemoMarketData.SampleStocks[0]]); await Idle();
+        Check(!dropdown.IsOpen, "a late autocomplete response does not reopen a dismissed dropdown");
+        search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search), Environment.TickCount, Key.Down)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent }); await Idle();
+        Check(dropdown.IsOpen, "the Down key intentionally reopens suggestions");
+        search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search), Environment.TickCount, Key.Escape)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        search.CaretIndex = search.Text.Length;
+        TextCompositionManager.StartComposition(new TextComposition(InputManager.Current, search, "우")); await Idle();
+        Check(dropdown.IsOpen && search.Text == "삼성전자우", "new typing reopens autocomplete after focus-only restoration");
+        main.Close(); await Idle();
     }
     private static async Task SearchInputTests()
     {

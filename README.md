@@ -9,7 +9,7 @@
 `StockViewer.exe`를 실행하고 종목을 검색합니다. 별도 설치나 API 키 입력은 필요 없습니다. 네이버 공개 시세를 인터넷으로 조회합니다.
 
 - 검색 창은 286×80 DIP입니다. 종목이름 Display 체크박스와 최소화·닫기가 같은 줄에 있으며, 아래에는 검색 입력칸과 검색 버튼만 있습니다.
-- 입력하면 자동완성이 열립니다. 결과 클릭, 검색 버튼, Enter로 팝업을 엽니다.
+- 입력하거나 입력칸을 왼쪽 클릭하거나 방향키를 누르면 자동완성이 열립니다. 가격 팝업을 닫아 검색칸으로 포커스가 돌아오는 것만으로는 열리지 않습니다. 결과 클릭, 검색 버튼, Enter로 팝업을 엽니다.
 - **종목이름 Display는 새 팝업을 여는 시점에만 적용**합니다. 이미 연 팝업은 바뀌지 않으며 팝업마다 표시 여부가 다를 수 있습니다.
 - 가격 창은 높이 32 DIP로 `종목명 가격 등락률`만 한 줄로 표시합니다. 이름을 숨기면 너비도 줄어듭니다.
 - **우클릭 한 번: Fix/Free 전환**. 고정하면 항상 위에 표시되고 위치를 옮길 수 없습니다.
@@ -42,6 +42,6 @@ dotnet StockViewer.Tests/bin/Release/net10.0-windows/StockViewer.Tests.dll --pub
 
 ## Release 자동 배포
 
-버전 태그를 올리면 GitHub Actions가 Release 빌드·회귀 검증·단일 EXE 실행 확인을 거쳐 GitHub Release에 StockViewer.exe를 첨부합니다. 별도 배포용 토큰 설정은 필요 없습니다. 다음 버전은 예를 들어 `git tag -a v1.0.5 -m "Release v1.0.5"` 후 `git push origin v1.0.5`로 배포합니다.
+버전 태그를 올리면 GitHub Actions가 Release 빌드·회귀 검증·단일 EXE 실행 확인을 거쳐 GitHub Release에 StockViewer.exe를 첨부합니다. 별도 배포용 토큰 설정은 필요 없습니다. 다음 버전은 예를 들어 `git tag -a v1.0.6 -m "Release v1.0.6"` 후 `git push origin v1.0.6`로 배포합니다.
 
 자세한 실행·수동 재시도·로컬 게시 방법은 [Release 문서](docs/Release.md)를 참고하세요.

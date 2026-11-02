@@ -10,14 +10,16 @@ v1.0.3은 톱니바퀴와 설정창을 제거합니다. 자동완성의 마우�
 
 v1.0.4는 가격 팝업을 우클릭 두 번으로 닫을 때 뒤쪽 창에 버튼을 떼는 이벤트가 전달되는 문제를 수정합니다. 팝업이 Up까지 캡처·소비한 뒤 닫히며, 단일 우클릭의 Fix/Free 전환은 유지됩니다.
 
+v1.0.5는 가격 팝업을 닫은 뒤 검색칸으로 포커스가 복귀할 때 자동완성이 저절로 펼쳐지는 문제를 수정합니다. 새 입력·입력칸 왼쪽 클릭·방향키로 요청할 때만 목록을 엽니다.
+
 ## 새 버전 배포
 
 변경 사항을 main에 커밋·푸시한 뒤 새 버전 태그를 올립니다. 예:
 
 ```powershell
 git push origin main
-git tag -a v1.0.5 -m "Release v1.0.5"
-git push origin v1.0.5
+git tag -a v1.0.6 -m "Release v1.0.6"
+git push origin v1.0.6
 ```
 
 `v숫자.숫자.숫자` 형식만 지원합니다. 이미 게시한 버전은 수정하거나 덮어쓰지 않고 다음 버전 번호를 사용합니다.
@@ -31,8 +33,8 @@ GitHub가 자동 발급하는 GITHUB_TOKEN을 사용하므로 별도 PAT나 증�
 ## 같은 방식으로 로컬 게시
 
 ```powershell
-./Publish.ps1 -Version 1.0.4
-./Publish.ps1 -Version 1.0.4 -OutputDirectory artifacts/release -SkipRootCopy
+./Publish.ps1 -Version 1.0.5
+./Publish.ps1 -Version 1.0.5 -OutputDirectory artifacts/release -SkipRootCopy
 ```
 
 기본 호출은 publish에 만든 EXE를 프로젝트 루트에도 복사합니다. SkipRootCopy는 실행 중인 루트 EXE를 건드리지 않고 별도 경로에 게시할 때 사용합니다. WPF는 트리밍하지 않으며 런타임·네이티브 라이브러리를 단일 EXE에 포함하고 압축합니다.

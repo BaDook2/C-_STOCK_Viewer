@@ -179,7 +179,7 @@ public partial class MainWindow : Window
         previous.Cancel();
         previous.Dispose();
     }
-    private void RefreshSuggestions()
+    private void RefreshSuggestions(bool openDropdown = false)
     {
         if (!initialized || searchClosed || closing) return;
         SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -187,7 +187,10 @@ public partial class MainWindow : Window
         var found = StockSearch.Find(stocks, SearchBox.Text);
         SearchResults.ItemsSource = found; SearchResults.SelectedIndex = found.Length == 0 ? -1 : 0;
         NoResults.Visibility = found.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        Suggestions.IsOpen = SearchBox.IsKeyboardFocusWithin && !string.IsNullOrWhiteSpace(SearchBox.Text);
+        // Focus restoration and background catalog updates must not start a new
+        // search gesture. Only explicit input/click/navigation may open a list.
+        Suggestions.IsOpen = (openDropdown || Suggestions.IsOpen) && IsActive
+            && SearchBox.IsKeyboardFocusWithin && !string.IsNullOrWhiteSpace(SearchBox.Text);
         pendingSearch = null;
         if (service is IStockSearchService remote && !string.IsNullOrWhiteSpace(SearchBox.Text))
         {
@@ -213,8 +216,12 @@ public partial class MainWindow : Window
         catch (Exception e) when (e is IOException or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
         { /* Keep cached local suggestions when public search is unavailable. */ }
     }
-    private void SearchChanged(object sender, TextChangedEventArgs e) { if (!suppressSearch) RefreshSuggestions(); }
-    private void SearchFocused(object sender, KeyboardFocusChangedEventArgs e) => RefreshSuggestions();
+    private void SearchChanged(object sender, TextChangedEventArgs e) { if (!suppressSearch) RefreshSuggestions(openDropdown: true); }
+    private void SearchBoxClicked(object sender, MouseButtonEventArgs e)
+    {
+        SearchBox.Focus();
+        RefreshSuggestions(openDropdown: true);
+    }
     private void SearchUnfocused(object sender, KeyboardFocusChangedEventArgs e) => DismissSuggestions();
     private void DismissSuggestions() => Suggestions.IsOpen = false;
     private async Task OpenSelectionAsync()
@@ -246,7 +253,7 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             if (SearchResults.Items.Count == 0) return;
-            if (!Suggestions.IsOpen) RefreshSuggestions();
+            if (!Suggestions.IsOpen) RefreshSuggestions(openDropdown: true);
             else SearchResults.SelectedIndex = Math.Clamp(SearchResults.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, SearchResults.Items.Count - 1);
             SearchResults.ScrollIntoView(SearchResults.SelectedItem);
         }

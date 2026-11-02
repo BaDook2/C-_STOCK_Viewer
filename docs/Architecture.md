@@ -20,6 +20,8 @@ Windows의 [WM_RBUTTONUP 규칙](https://learn.microsoft.com/en-us/windows/win32
 
 X는 ClickMode.Press로 처리하고 창 이동용 Border는 버튼·체크박스의 형제 요소로 분리합니다. 자동완성 Popup은 StaysOpen=true로 마우스 캡처를 하지 않으며 포커스와 바깥 클릭으로 닫습니다. OpenSelectionAsync는 원격 검색 대기 전후에 searchClosed를 확인하여 닫은 검색 UI의 재개방 요청을 막습니다. 설정 버튼과 SettingsWindow는 제거했습니다.
 
+자동완성은 GotKeyboardFocus에서 열지 않습니다. 입력·왼쪽 클릭·방향키가 RefreshSuggestions(openDropdown: true)를 요청하고, 카탈로그 갱신은 기본 인수로 현재 열림 상태만 유지합니다. 목록이 열리려면 검색 창이 활성 상태이고 검색칸에 키보드 포커스와 검색어가 있어야 합니다. 가격 창 종료 후 포커스 복귀는 검색 요청이나 목록 열기를 발생시키지 않습니다.
+
 가격 창은 PopupPlacement.BelowSearch로 검색 창 아래에 가로 중앙 정렬하며 화면 하단에서는 위쪽으로 배치합니다. 초기 위치부터 입력칸을 덮지 않도록 Measure 뒤 좌표를 설정합니다.
 
 디자인 기준은 사용자의 기존 STOCK/Stock.App/Styles/TossInspired.xaml입니다. 검색 창 286×80 DIP, 가격 창 높이 32 DIP를 유지하고 가격 팝업에는 별도 버튼과 메뉴를 표시하지 않습니다.
