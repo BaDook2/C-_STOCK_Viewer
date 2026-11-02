@@ -33,3 +33,8 @@
 - 수정: CancelPendingSearch에서 참조와 대기 작업을 먼저 비운 뒤 한 번만 Cancel/Dispose. 입력 갱신·종목 선택·서비스 전환·종료에서 같은 정리를 사용함. 빈 원격 응답의 선택 인덱스도 -1로 유지함.
 - Release 빌드 경고 0 / 오류 0. 오프라인 검증 107개 통과.
 - 새 회귀 검증: 삼성 검색 후 삭제·포커스 이동·큐리/삼성전자/NAVER/005930/SK하이닉스/한화에어로스페이스 재입력, 공백 검색 뒤 재입력, 큐리 원격 자동완성과 Enter로 팝업 열기, 빈 결과, 네트워크 실패 후 복구, 취소된 응답 무시, 검색어 삭제 직후 종료.
+- v1.0.1 Release 게시 완료: https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v1.0.1
+- Actions 성공: https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/41372141454. Windows 러너에서 107개 검증 및 EXE 단독 시작 확인 통과.
+- 실제 Release EXE를 다시 내려받아 삼성전자 입력 → Ctrl+A / Backspace → 큐리 재입력 → 큐리언트(4글자) 입력 → Enter를 수행함. 앱 종료 없이 자동완성과 실제 공개 가격·등락률 팝업을 확인했고 X로 정상 종료함.
+- 배포 EXE 크기 64944713 bytes, 제품 버전 1.0.1+3c0b7273c9633a96831b96b85482855b2770c945.
+- SHA256: EC259387E15E89679747C03B71528F2994960FE300DABF88560B7C1054BF0F47. GitHub 첨부 digest와 일치하며 프로젝트 루트와 publish의 EXE도 이 파일로 갱신함.
