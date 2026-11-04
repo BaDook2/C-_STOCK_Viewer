@@ -35,7 +35,7 @@ public static class Program
             {
                 if (args.Contains("--right-click-check")) await RightClickCheck();
                 else if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UnitedStatesDataTests(); await RightClickReleaseTests(); await UiTests(); await UnitedStatesUiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); }
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UnitedStatesDataTests(); await RightClickReleaseTests(); await ChordGestureTests(); await UiTests(); await UnitedStatesUiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); await SearchRecallTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -76,6 +76,14 @@ public static class Program
         Check(!KiwoomParser.Realtime(Json("{\"trnm\":\"PING\"}")).Any(), "ignore non-trade messages");
         Check(!KiwoomParser.Realtime(Json(Tick("005930", "bad", "+2.50"))).Any(), "ignore malformed trade row");
         Check(new ApiCredentials("sensitive-app", "sensitive-secret").ToString().Contains("hidden"), "credentials ToString redacted");
+        var below = PopupPlacement.BelowAnchor(new System.Windows.Rect(500, 100, 170, 32), new Size(286, 80), new System.Windows.Rect(0, 0, 1920, 1040));
+        Check(below == new Point(442, 136), "search is centered below the quote with a four-DIP gap");
+        var above = PopupPlacement.BelowAnchor(new System.Windows.Rect(500, 1000, 170, 32), new Size(286, 80), new System.Windows.Rect(0, 0, 1920, 1040));
+        Check(above.Y == 916 && above.X == 442, "search flips above a quote near the bottom work-area edge");
+        var negative = PopupPlacement.BelowAnchor(new System.Windows.Rect(-1600, 60, 170, 32), new Size(286, 80), new System.Windows.Rect(-1600, 0, 1600, 900));
+        Check(negative.X == -1600 && negative.Y == 96, "a monitor left of the primary screen clamps search to its own left edge");
+        var rightEdge = PopupPlacement.BelowAnchor(new System.Windows.Rect(-170, 60, 170, 32), new Size(286, 80), new System.Windows.Rect(-1600, 0, 1600, 900));
+        Check(rightEdge.X + 286 == 0, "search stays within the source monitor's right edge");
         return Task.CompletedTask;
     }
     private static async Task TransportTests()
@@ -379,9 +387,9 @@ public static class Program
         close.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); await Idle();
         Check(!main.IsVisible && replacement.IsVisible && main.Popups.Count == 1 && ended == 0,
             "clicking X with autocomplete open closes search and preserves the fixed price popup");
-        Check(!IsWindow(mainHandle) && IsWindow(new WindowInteropHelper(replacement).Handle)
+        Check(IsWindow(mainHandle) && !IsWindowVisible(mainHandle) && IsWindow(new WindowInteropHelper(replacement).Handle)
             && !((Popup)main.FindName("Suggestions")).IsOpen,
-            "X destroys the native search window and autocomplete while retaining the price window");
+            "X hides search and autocomplete for recall while retaining the price window");
         var lastQuote = replacement.LastQuote;
         await Until(() => !ReferenceEquals(lastQuote, replacement.LastQuote));
         Check(true, "quotes continue refreshing after the search window closes");
@@ -608,11 +616,11 @@ public static class Program
             var popup = new QuoteWindow(DemoMarketData.SampleStocks[0], true) { Left = 180, Top = 160 };
             popup.Show(); await Idle(); popup.SetFixed(initiallyFixed);
             var handle = new WindowInteropHelper(popup).Handle;
-            popup.ProcessRightClick(1);
-            Check(popup.IsFixed != initiallyFixed && popup.IsVisible, "single right-down still toggles Fix/Free");
+            popup.ProcessMouseDown(MouseButton.Right, 1);
+            Check(popup.IsFixed == initiallyFixed && popup.IsVisible, "right-down waits for release so a left-button chord can take priority");
             var firstUp = RaiseRightButtonUp(popup);
-            Check(firstUp.Handled && popup.IsVisible && Mouse.Captured is null, "single right-up is consumed and releases capture without closing");
-            popup.ProcessRightClick(2);
+            Check(firstUp.Handled && popup.IsFixed != initiallyFixed && popup.IsVisible && Mouse.Captured is null, "single right-up toggles Fix/Free, is consumed and releases capture without closing");
+            popup.ProcessMouseDown(MouseButton.Right, 2);
             Check(popup.IsVisible && IsWindow(handle) && Mouse.Captured == popup && GetCapture() == handle,
                 "second right-down retains the native popup and mouse capture until release");
             var secondUp = RaiseRightButtonUp(popup);
@@ -623,14 +631,146 @@ public static class Program
                 "popup closes after right-up dispatch and leaves no mouse capture");
         }
     }
-    private static MouseButtonEventArgs RaiseRightButtonUp(QuoteWindow popup)
+    private static async Task ChordGestureTests()
     {
-        var release = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
-            { RoutedEvent = UIElement.PreviewMouseRightButtonUpEvent };
+        foreach (var initiallyFixed in new[] { false, true })
+        foreach (var first in new[] { MouseButton.Left, MouseButton.Right })
+        foreach (var firstRelease in new[] { MouseButton.Left, MouseButton.Right })
+        {
+            var popup = new QuoteWindow(DemoMarketData.SampleStocks[0], true) { Left = 180, Top = 160 };
+            popup.Show(); await Idle(); popup.SetFixed(initiallyFixed);
+            var requests = 0; popup.SearchRequested += (_, _) => requests++;
+            var handle = new WindowInteropHelper(popup).Handle;
+            var start = new Point(popup.Left, popup.Top);
+            var second = first == MouseButton.Left ? MouseButton.Right : MouseButton.Left;
+            var lastRelease = firstRelease == MouseButton.Left ? MouseButton.Right : MouseButton.Left;
+            // Also cover a chord interrupting the second click of a right double-click.
+            popup.ProcessMouseDown(first, 2);
+            popup.ProcessMouseDown(second, 2);
+            popup.ProcessMouseMove(popup.PointToScreen(new Point(80, 60)), true, true);
+            Check(popup.IsFixed == initiallyFixed && popup.IsVisible && new Point(popup.Left, popup.Top) == start,
+                "either chord press order suppresses Fix, double-right close and dragging");
+            var firstUp = RaiseButtonUp(popup, firstRelease); await Idle();
+            Check(firstUp.Handled && requests == 0 && Mouse.Captured == popup && GetCapture() == handle,
+                "either chord release order retains capture and waits for the other button");
+            var lastUp = RaiseButtonUp(popup, lastRelease);
+            Check(lastUp.Handled && requests == 0 && popup.IsVisible && IsWindow(handle),
+                "the last chord release is consumed before requesting search");
+            await Idle();
+            Check(requests == 1 && popup.IsFixed == initiallyFixed && popup.IsVisible && Mouse.Captured is null && GetCapture() == IntPtr.Zero,
+                "a completed chord requests search exactly once and releases native capture without changing the quote");
+            RightClick(popup, 2); await Idle();
+            Check(popup.IsVisible && popup.IsFixed != initiallyFixed, "the first right click after a chord ignores a stale double-click count");
+            RightClick(popup, 2); await Idle();
+            Check(!popup.IsVisible, "two standalone right clicks still close normally after a chord");
+        }
+        var dragged = new QuoteWindow(DemoMarketData.SampleStocks[0], true) { Left = 220, Top = 200 };
+        dragged.Show(); await Idle();
+        var dragRequests = 0; dragged.SearchRequested += (_, _) => dragRequests++;
+        var dragOrigin = dragged.PointToScreen(Mouse.GetPosition(dragged));
+        dragged.ProcessMouseDown(MouseButton.Left);
+        dragged.ProcessMouseMove(dragOrigin + new Vector(30, 25), true, false);
+        Check(dragged.Left > 220 && dragged.Top > 200, "left-only drag still moves a Free quote without entering a native modal drag loop");
+        var dragPosition = new Point(dragged.Left, dragged.Top);
+        dragged.ProcessMouseDown(MouseButton.Right);
+        dragged.ProcessMouseMove(dragOrigin + new Vector(100, 100), true, true);
+        RaiseButtonUp(dragged, MouseButton.Right); RaiseButtonUp(dragged, MouseButton.Left); await Idle();
+        Check(dragRequests == 1 && new Point(dragged.Left, dragged.Top) == dragPosition, "pressing right during a left drag stops movement and requests search");
+        dragged.SetFixed(true);
+        dragged.ProcessMouseDown(MouseButton.Left);
+        dragged.ProcessMouseMove(dragOrigin + new Vector(150, 150), true, false); RaiseButtonUp(dragged, MouseButton.Left);
+        Check(new Point(dragged.Left, dragged.Top) == dragPosition && dragged.IsFixed, "a fixed quote remains immovable during left drag");
+        dragged.ProcessMouseDown(MouseButton.Left); dragged.ProcessMouseDown(MouseButton.Right);
+        Mouse.Capture(null);
+        RaiseButtonUp(dragged, MouseButton.Left); RaiseButtonUp(dragged, MouseButton.Right); await Idle();
+        Check(dragRequests == 1 && dragged.IsVisible && dragged.IsFixed, "unexpected capture loss cancels an unfinished chord without showing search or changing Fix");
+        dragged.ProcessMouseDown(MouseButton.Right, otherButtonPressed: true);
+        RaiseButtonUp(dragged, MouseButton.Left); RaiseButtonUp(dragged, MouseButton.Right); await Idle();
+        Check(dragRequests == 2 && dragged.IsFixed, "a button already held when entering the quote can complete a chord");
+        var routedLeft = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent };
+        var routedRight = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right) { RoutedEvent = Mouse.PreviewMouseDownEvent };
+        dragged.RaiseEvent(routedLeft); dragged.RaiseEvent(routedRight);
+        RaiseButtonUp(dragged, MouseButton.Right); RaiseButtonUp(dragged, MouseButton.Left); await Idle();
+        Check(routedLeft.Handled && routedRight.Handled && dragRequests == 3 && dragged.IsFixed,
+            "the XAML mouse-down and mouse-up handlers route a complete chord and consume both buttons");
+        dragged.Close();
+    }
+    private static async Task SearchRecallTests()
+    {
+        var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-recall-" + Guid.NewGuid().ToString("N")));
+        store.SaveDisplayName(true);
+        var main = new MainWindow(store, false) { Left = 140, Top = 100 };
+        main.Show(); await main.UseServiceAsync(new DemoMarketData(), DemoMarketData.SampleStocks);
+        var first = (await main.OpenStockAsync(DemoMarketData.SampleStocks[0]))!;
+        var second = (await main.OpenStockAsync(DemoMarketData.SampleStocks[1]))!; await Idle();
+        first.Left = 400; first.Top = 220; first.SetFixed(true);
+        second.Left = 600; second.Top = 400;
+        var handle = new WindowInteropHelper(main).Handle;
+        var search = (TextBox)main.FindName("SearchBox");
+        var display = (CheckBox)main.FindName("DisplayName");
+        var suggestions = (Popup)main.FindName("Suggestions");
+        main.Activate(); search.Focus(); search.Text = "삼성"; await Idle();
+        var quotePosition = new Point(first.Left, first.Top);
+        ChordClick(first); await Idle();
+        Check(main.IsVisible && new WindowInteropHelper(main).Handle == handle
+            && Math.Abs(main.Left + main.ActualWidth / 2 - (first.Left + first.ActualWidth / 2)) < 2
+            && main.Top >= first.Top + first.ActualHeight, "a visible search window moves below the clicked quote without creating another window");
+        Check(search.Text == "삼성" && display.IsChecked == true && !suggestions.IsOpen && search.IsKeyboardFocused,
+            "recall preserves search text and display preference, focuses input and keeps autocomplete closed");
+        Check(first.IsFixed && new Point(first.Left, first.Top) == quotePosition && main.Popups.Count == 2,
+            "recall leaves fixed quote positions and all popup subscriptions intact");
+        var ended = 0; main.SessionEnded += (_, _) => ended++;
+        main.Close(); await Idle();
+        Check(!main.IsVisible && !IsWindowVisible(handle) && first.IsVisible && second.IsVisible && ended == 0,
+            "X hides search while its quotes keep running and can recall it");
+        second.Top = SystemParameters.WorkArea.Bottom - second.ActualHeight - 2;
+        ChordClick(second, MouseButton.Right, MouseButton.Left); await Idle();
+        Check(main.IsVisible && main.Top + main.ActualHeight <= second.Top
+            && new WindowInteropHelper(main).Handle == handle,
+            "a hidden search window is restored above a bottom-edge quote with the same native window");
+        Check(Application.Current.Windows.OfType<MainWindow>().Count() == 1 && ended == 0 && first.LastQuote is not null && second.LastQuote is not null,
+            "recall reuses one search window and retains both live quote states");
+        main.WindowState = WindowState.Minimized; second.Top = SystemParameters.WorkArea.Top + 180;
+        ChordClick(second); await Idle();
+        Check(main.WindowState == WindowState.Normal && main.IsVisible && main.Top >= second.Top + second.ActualHeight,
+            "a minimized search window is restored near the newly clicked quote");
+        SaveImage(main, "search-recalled.png");
+        main.Close(); await Idle(); ChordClick(first); await Idle(); main.Close(); await Idle();
+        first.Close(); second.Close(); await Until(() => ended == 1);
+        Check(!IsWindow(handle), "closing the last quote after hiding search destroys the retained native search window and ends the session");
+
+        var pendingMain = new MainWindow(store, false);
+        var remote = new DelayedSearchService();
+        pendingMain.Show(); await pendingMain.UseServiceAsync(remote, DemoMarketData.SampleStocks);
+        var kept = (await pendingMain.OpenStockAsync(DemoMarketData.SampleStocks[0]))!;
+        var pendingSearch = (TextBox)pendingMain.FindName("SearchBox");
+        pendingMain.Activate(); pendingSearch.Focus(); pendingSearch.Text = "미완성검색";
+        await Until(() => remote.Requests.Count == 1);
+        ((Button)pendingMain.FindName("SearchButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        pendingMain.Close(); await Idle(); ChordClick(kept); await Idle();
+        remote.Requests[0].Reply.SetResult([]); await Idle();
+        Check(pendingMain.IsVisible && pendingMain.Popups.Count == 1 && !((Popup)pendingMain.FindName("Suggestions")).IsOpen && remote.Requests.Count == 1,
+            "a search submitted before hide cannot open suggestions or a popup after recall");
+        kept.Close(); await Idle();
+        Check(pendingMain.IsVisible && pendingMain.Popups.Count == 0, "closing the last quote after recall keeps the visible search window available");
+        pendingMain.Close(); await Idle();
+    }
+    private static MouseButtonEventArgs RaiseButtonUp(QuoteWindow popup, MouseButton button)
+    {
+        var release = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, button)
+            { RoutedEvent = Mouse.PreviewMouseUpEvent };
         popup.RaiseEvent(release); return release;
     }
+    private static MouseButtonEventArgs RaiseRightButtonUp(QuoteWindow popup) => RaiseButtonUp(popup, MouseButton.Right);
     private static void RightClick(QuoteWindow popup, int clickCount)
-    { popup.ProcessRightClick(clickCount); RaiseRightButtonUp(popup); }
+    { popup.ProcessMouseDown(MouseButton.Right, clickCount); RaiseRightButtonUp(popup); }
+    private static void ChordClick(QuoteWindow popup, MouseButton first = MouseButton.Left, MouseButton firstRelease = MouseButton.Right)
+    {
+        var second = first == MouseButton.Left ? MouseButton.Right : MouseButton.Left;
+        var lastRelease = firstRelease == MouseButton.Left ? MouseButton.Right : MouseButton.Left;
+        popup.ProcessMouseDown(first); popup.ProcessMouseDown(second);
+        RaiseButtonUp(popup, firstRelease); RaiseButtonUp(popup, lastRelease);
+    }
     private static async Task RightClickCheck()
     {
         var status = new TextBlock { Margin = new Thickness(18), FontSize = 14, Foreground = Brushes.Black, VerticalAlignment = VerticalAlignment.Top };
@@ -693,6 +833,7 @@ public static class Program
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr GetCapture();
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 

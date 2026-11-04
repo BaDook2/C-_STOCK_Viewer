@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -17,7 +18,8 @@ public partial class MainWindow : Window
     private ConnectionStatus connection = new("공개 시세 연결 대기 · API 키 불필요");
     private CancellationTokenSource? searchCancellation;
     private Task? pendingSearch;
-    private bool suppressSearch, closing, initialized, searchClosed;
+    private bool suppressSearch, closing, initialized, searchHidden, windowClosed, loaded;
+    private long searchVisibilityVersion;
     public event EventHandler? SessionEnded;
     public IReadOnlyDictionary<string, QuoteWindow> Popups => popups;
     public string StatusMessage => connection.Message;
@@ -36,6 +38,8 @@ public partial class MainWindow : Window
         };
         Loaded += async (_, _) =>
         {
+            if (loaded) return;
+            loaded = true;
             SearchBox.Focus();
             if (!autoConnect) return;
             try
@@ -48,9 +52,23 @@ public partial class MainWindow : Window
         };
         Closed += OnClosed;
     }
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!closing && popups.Count > 0)
+        {
+            e.Cancel = true;
+            searchVisibilityVersion++;
+            searchHidden = true;
+            DismissSuggestions();
+            CancelPendingSearch();
+            Hide();
+        }
+        base.OnClosing(e);
+    }
     private async void OnClosed(object? sender, EventArgs e)
     {
-        searchClosed = true; Suggestions.IsOpen = false;
+        windowClosed = true;
+        searchHidden = true; Suggestions.IsOpen = false;
         CancelPendingSearch();
         if (popups.Count == 0) await EndSessionAsync();
     }
@@ -62,14 +80,28 @@ public partial class MainWindow : Window
         finally
         {
             session.Dispose(); lifetime.Dispose();
+            if (!windowClosed) Close();
             SessionEnded?.Invoke(this, EventArgs.Empty);
         }
+    }
+    private void ShowSearchNearQuote(object? sender, EventArgs e)
+    {
+        if (closing || windowClosed || sender is not QuoteWindow popup || !popup.IsVisible
+            || !popups.TryGetValue(popup.Stock.Code, out var current) || !ReferenceEquals(current, popup)) return;
+        searchHidden = false;
+        DismissSuggestions();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        PopupPlacement.BelowQuote(this, popup);
+        if (!IsVisible) Show();
+        PopupPlacement.BelowQuote(this, popup);
+        Activate();
+        SearchBox.Focus();
     }
     private async Task UsePublicServiceAsync()
     {
         var client = new PublicMarketData();
         await UseServiceAsync(client, stocks);
-        if (closing || searchClosed) return;
+        if (closing || searchHidden) return;
         _ = RefreshPublicCatalogAsync(client, session.Token);
     }
     private async Task RefreshPublicCatalogAsync(IMarketDataService client, CancellationToken cancellation)
@@ -77,7 +109,7 @@ public partial class MainWindow : Window
         try
         {
             var catalog = await client.GetStocksAsync(cancellation);
-            if (closing || searchClosed || !ReferenceEquals(service, client)) return;
+            if (closing || searchHidden || !ReferenceEquals(service, client)) return;
             stocks = catalog.Concat(stocks).DistinctBy(s => s.Code).ToArray();
             settings.SaveCatalog(stocks);
             RefreshSuggestions();
@@ -129,18 +161,20 @@ public partial class MainWindow : Window
     }
     public async Task<QuoteWindow?> OpenStockAsync(Stock stock)
     {
-        if (closing || searchClosed) return null;
+        if (closing || searchHidden) return null;
         if (!popups.ContainsKey(stock.Code) && popups.Count >= 200)
         { ShowStatus(new("동시에 최대 200개 종목까지 표시할 수 있어요.", connection.Connected, connection.IsDemo)); return null; }
         if (popups.Remove(stock.Code, out var old)) old.Close();
         var popup = new QuoteWindow(stock, DisplayName.IsChecked == true);
         popups[stock.Code] = popup;
+        popup.SearchRequested += ShowSearchNearQuote;
         popup.Closed += async (_, _) =>
         {
+            popup.SearchRequested -= ShowSearchNearQuote;
             if (popups.TryGetValue(stock.Code, out var current) && ReferenceEquals(current, popup))
             {
                 popups.Remove(stock.Code);
-                if (searchClosed && popups.Count == 0) await EndSessionAsync();
+                if (searchHidden && popups.Count == 0) await EndSessionAsync();
                 else await UpdateSubscriptionsAsync();
             }
         };
@@ -149,7 +183,7 @@ public partial class MainWindow : Window
         popup.Measure(new Size(double.PositiveInfinity, popup.Height));
         popup.Left = Left + (ActualWidth - popup.DesiredSize.Width) / 2;
         popup.Top = Top + ActualHeight + 4;
-        popup.ContentRendered += (_, _) => { if (!searchClosed && popup.IsVisible) PopupPlacement.BelowSearch(popup, this); };
+        popup.ContentRendered += (_, _) => { if (!searchHidden && popup.IsVisible) PopupPlacement.BelowSearch(popup, this); };
         popup.Show(); PopupPlacement.BelowSearch(popup, this);
         Suggestions.IsOpen = false;
         await UpdateSubscriptionsAsync();
@@ -181,7 +215,7 @@ public partial class MainWindow : Window
     }
     private void RefreshSuggestions(bool openDropdown = false)
     {
-        if (!initialized || searchClosed || closing) return;
+        if (!initialized || searchHidden || closing) return;
         SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         CancelPendingSearch();
         var found = StockSearch.Find(stocks, SearchBox.Text);
@@ -204,7 +238,7 @@ public partial class MainWindow : Window
         {
             await Task.Delay(250, cancellation);
             var results = await remote.SearchAsync(query, cancellation);
-            if (closing || searchClosed || cancellation.IsCancellationRequested || !ReferenceEquals(service, remote) || SearchBox.Text != query) return;
+            if (closing || searchHidden || cancellation.IsCancellationRequested || !ReferenceEquals(service, remote) || SearchBox.Text != query) return;
             var selectedCode = (SearchResults.SelectedItem as Stock)?.Code;
             stocks = results.Concat(stocks).DistinctBy(s => s.Code).ToArray();
             var matches = results.Concat(StockSearch.Find(stocks, query)).DistinctBy(s => s.Code).Take(12).ToArray();
@@ -226,11 +260,12 @@ public partial class MainWindow : Window
     private void DismissSuggestions() => Suggestions.IsOpen = false;
     private async Task OpenSelectionAsync()
     {
-        if (closing || searchClosed) return;
+        if (closing || searchHidden) return;
         var query = StockSearch.Normalize(SearchBox.Text);
+        var visibilityVersion = searchVisibilityVersion;
         if (query.Length == 0) { SearchBox.Focus(); return; }
         if (pendingSearch is { } pending) await pending;
-        if (closing || searchClosed || query != StockSearch.Normalize(SearchBox.Text)) return;
+        if (closing || searchHidden || visibilityVersion != searchVisibilityVersion || query != StockSearch.Normalize(SearchBox.Text)) return;
         var found = StockSearch.Find(stocks, SearchBox.Text);
         var chosen = found.FirstOrDefault(s => StockSearch.IsExactMatch(s, query))
             ?? (SearchResults.SelectedItem as Stock) ?? found.FirstOrDefault();
@@ -239,7 +274,7 @@ public partial class MainWindow : Window
     }
     private async Task SelectAndOpenAsync(Stock stock)
     {
-        if (closing || searchClosed) return;
+        if (closing || searchHidden) return;
         CancelPendingSearch();
         suppressSearch = true; SearchBox.Text = stock.Name; SearchBox.CaretIndex = SearchBox.Text.Length; suppressSearch = false;
         SearchPlaceholder.Visibility = Visibility.Collapsed; Suggestions.IsOpen = false;
@@ -276,6 +311,6 @@ public partial class MainWindow : Window
     {
         e.Handled = true;
         DismissSuggestions();
-        if (!searchClosed) Close();
+        if (!searchHidden) Close();
     }
 }

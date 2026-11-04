@@ -14,14 +14,16 @@ v1.0.5는 가격 팝업을 닫은 뒤 검색칸으로 포커스가 복귀할 때
 
 v1.1.0은 API 키 없이 미국 주식·ETF를 한글 이름이나 티커로 검색하고 달러 가격을 표시합니다. 국내·미국 팝업을 함께 사용할 수 있으며 최신 프리마켓·애프터마켓 가격이 제공되면 전일 대비 등락률을 계산해 표시합니다. 시장별 제공처 갱신 간격을 따르며 기존 창 크기와 조작 방식은 유지합니다.
 
+v1.1.1은 가격 팝업의 좌우 버튼 동시 클릭으로 검색 창을 재표시하거나 이동합니다. 기본은 가격 창 아래이며 아래 공간이 부족하면 위에 표시합니다. 숨김·최소화 상태도 복원하고 기존 검색어와 이름 표시 설정은 유지합니다. 두 버튼을 모두 뗄 때까지 캡처하며 고정 전환·더블클릭 종료보다 우선 처리합니다.
+
 ## 새 버전 배포
 
 변경 사항을 main에 커밋·푸시한 뒤 새 버전 태그를 올립니다. 예:
 
 ```powershell
 git push origin main
-git tag -a v1.1.0 -m "Release v1.1.0"
-git push origin v1.1.0
+git tag -a v1.1.1 -m "Release v1.1.1"
+git push origin v1.1.1
 ```
 
 `v숫자.숫자.숫자` 형식만 지원합니다. 이미 게시한 버전은 수정하거나 덮어쓰지 않고 다음 버전 번호를 사용합니다.
@@ -35,8 +37,8 @@ GitHub가 자동 발급하는 GITHUB_TOKEN을 사용하므로 별도 PAT나 증�
 ## 같은 방식으로 로컬 게시
 
 ```powershell
-./Publish.ps1 -Version 1.1.0
-./Publish.ps1 -Version 1.1.0 -OutputDirectory artifacts/release -SkipRootCopy
+./Publish.ps1 -Version 1.1.1
+./Publish.ps1 -Version 1.1.1 -OutputDirectory artifacts/release -SkipRootCopy
 ```
 
 기본 호출은 publish에 만든 EXE를 프로젝트 루트에도 복사합니다. SkipRootCopy는 실행 중인 루트 EXE를 건드리지 않고 별도 경로에 게시할 때 사용합니다. WPF는 트리밍하지 않으며 런타임·네이티브 라이브러리를 단일 EXE에 포함하고 압축합니다.

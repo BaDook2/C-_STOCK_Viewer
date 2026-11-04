@@ -17,8 +17,11 @@ public partial class QuoteWindow : Window
     public Quote? LastQuote { get; private set; }
     public string DisplayedPrice => PriceText.Text;
     public string StatusMessage { get; private set; } = "시세 연결 대기";
+    public event EventHandler? SearchRequested;
     private HwndSource? source;
-    private bool rightButtonDown, closeOnRightButtonUp, closeQueued, closed;
+    private bool leftButtonDown, rightButtonDown, closeOnRelease, closeQueued, closed;
+    private bool searchPending, searchDispatchQueued, resetRightClickCount, leftDragging;
+    private Point dragStartScreen, dragStartWindowPixels;
     private ConnectionStatus status = new("시세 연결 대기");
     public QuoteWindow(Stock stock, bool showName)
     {
@@ -63,7 +66,7 @@ public partial class QuoteWindow : Window
     public void ResetQuote()
     { LastQuote = null; PriceText.Text = "—"; PercentText.Text = "—"; PriceText.Foreground = PercentText.Foreground = (Brush)FindResource("TextMutedBrush"); RefreshStatus(); }
     private void SetStatus(string message)
-    { StatusMessage = message; Card.ToolTip = message + $"\n{(IsFixed ? "Fix" : "Free")} · 우클릭: 고정 전환 · 우클릭 두 번: 닫기"; }
+    { StatusMessage = message; Card.ToolTip = message + $"\n{(IsFixed ? "Fix" : "Free")} · 우클릭: 고정 전환 · 우클릭 두 번: 닫기\n좌우 버튼 동시 클릭: 근처에 검색창 표시"; }
     private void RefreshStatus()
     {
         Card.Opacity = status.Connected || LastQuote is null ? 1 : .55;
@@ -80,25 +83,46 @@ public partial class QuoteWindow : Window
         SetStatus(time is { Length: 6 } ? $"KRX · 최근 체결 {time[..2]}:{time[2..4]}:{time[4..]}"
             : "KRX · 최근 조회 " + LastQuote.ReceivedAt.ToOffset(TimeSpan.FromHours(9)).ToString("HH:mm:ss"));
     }
-    public void ProcessRightClick(int clickCount)
+    public void ProcessMouseDown(MouseButton button, int clickCount = 1, bool otherButtonPressed = false)
     {
-        if (closed || closeQueued || !IsVisible || clickCount < 1) return;
-        rightButtonDown = true;
-        if (clickCount >= 2) closeOnRightButtonUp = true;
-        else SetFixed(!IsFixed);
-        // Keep the release directed at this HWND even if the pointer moves out.
+        if (closed || closeQueued || !IsVisible || button is not (MouseButton.Left or MouseButton.Right)) return;
+        if (button == MouseButton.Left)
+        {
+            leftButtonDown = true; rightButtonDown |= otherButtonPressed;
+            dragStartScreen = PointToScreen(Mouse.GetPosition(this));
+            dragStartWindowPixels = PointToScreen(new Point()); leftDragging = false;
+            resetRightClickCount = true;
+        }
+        else
+        {
+            rightButtonDown = true; leftButtonDown |= otherButtonPressed;
+            closeOnRelease = !resetRightClickCount && clickCount >= 2;
+            resetRightClickCount = false;
+        }
+        if (leftButtonDown && rightButtonDown || searchPending) BeginSearchGesture();
+        // Keep both releases directed at this HWND, including when the pointer moves out.
         Mouse.Capture(this, CaptureMode.SubTree);
     }
-    private void PopupRightClick(object sender, MouseButtonEventArgs e)
-    { e.Handled = true; ProcessRightClick(e.ClickCount); }
-    private void PopupRightButtonUp(object sender, MouseButtonEventArgs e)
+    private void BeginSearchGesture()
     {
-        e.Handled = true;
-        if (!rightButtonDown || closed) return;
-        rightButtonDown = false;
-        if (closeOnRightButtonUp)
+        searchPending = true; closeOnRelease = false;
+        resetRightClickCount = true; leftDragging = false;
+    }
+    public void ProcessMouseUp(MouseButton button)
+    {
+        if (closed || button is not (MouseButton.Left or MouseButton.Right)) return;
+        var wasDown = button == MouseButton.Left ? leftButtonDown : rightButtonDown;
+        if (button == MouseButton.Left) { leftButtonDown = false; leftDragging = false; }
+        else rightButtonDown = false;
+        if (searchPending)
         {
-            closeOnRightButtonUp = false; closeQueued = true;
+            if (!leftButtonDown && !rightButtonDown) QueueSearchRequest();
+            return;
+        }
+        if (closeOnRelease)
+        {
+            if (leftButtonDown || rightButtonDown || closeQueued) return;
+            closeOnRelease = false; closeQueued = true;
             // Finish WM_RBUTTONUP (and its possible WM_CONTEXTMENU) before
             // destroying the window. Closing on down leaks up to the desktop.
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
@@ -107,13 +131,74 @@ public partial class QuoteWindow : Window
                 if (Mouse.Captured == this) Mouse.Capture(null);
                 Close();
             }));
+            return;
         }
-        else if (Mouse.Captured == this) Mouse.Capture(null);
+        // Waiting until up lets a second button turn the click into a search gesture.
+        if (button == MouseButton.Right && wasDown) SetFixed(!IsFixed);
+        if (!leftButtonDown && !rightButtonDown && Mouse.Captured == this) Mouse.Capture(null);
+    }
+    private void QueueSearchRequest()
+    {
+        if (searchDispatchQueued) return;
+        searchDispatchQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            searchDispatchQueued = false;
+            if (closed || !searchPending || leftButtonDown || rightButtonDown) return;
+            searchPending = false;
+            if (Mouse.Captured == this) Mouse.Capture(null);
+            SearchRequested?.Invoke(this, EventArgs.Empty);
+        }));
+    }
+    public void ProcessMouseMove(Point screenPosition, bool leftPressed, bool rightPressed)
+    {
+        if (closed || closeQueued || searchPending || !leftButtonDown || !leftPressed) return;
+        if (rightButtonDown || rightPressed)
+        {
+            rightButtonDown = true; BeginSearchGesture(); return;
+        }
+        var windowSource = source;
+        if (IsFixed || windowSource?.CompositionTarget is not { } target) return;
+        var pixels = screenPosition - dragStartScreen;
+        var offset = target.TransformFromDevice.Transform(pixels);
+        if (!leftDragging && Math.Abs(offset.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(offset.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        leftDragging = true;
+        // Keep the physical drag origin stable when crossing monitors with different DPI.
+        SetWindowPos(windowSource.Handle, IntPtr.Zero, (int)Math.Round(dragStartWindowPixels.X + pixels.X),
+            (int)Math.Round(dragStartWindowPixels.Y + pixels.Y), 0, 0, 0x0001 | 0x0004 | 0x0010);
+    }
+    private void PopupMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton is not (MouseButton.Left or MouseButton.Right)) return;
+        e.Handled = true;
+        ProcessMouseDown(e.ChangedButton, e.ClickCount,
+            (e.ChangedButton == MouseButton.Left ? e.RightButton : e.LeftButton) == MouseButtonState.Pressed);
+    }
+    private void PopupMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton is not (MouseButton.Left or MouseButton.Right)) return;
+        e.Handled = true; ProcessMouseUp(e.ChangedButton);
+    }
+    private void PopupMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!leftButtonDown) return;
+        e.Handled = true;
+        ProcessMouseMove(PointToScreen(e.GetPosition(this)), e.LeftButton == MouseButtonState.Pressed, e.RightButton == MouseButtonState.Pressed);
+    }
+    private void PopupLostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (Mouse.Captured == this) return;
+        if (leftButtonDown || rightButtonDown || searchPending) resetRightClickCount = true;
+        leftButtonDown = rightButtonDown = searchPending = closeOnRelease = leftDragging = false;
     }
     private void PopupKeyDown(object sender, KeyEventArgs e)
-    { if (e.Key == Key.Escape) { e.Handled = true; if (rightButtonDown) closeOnRightButtonUp = true; else Close(); } }
-    private void DragCard(object sender, MouseButtonEventArgs e)
-    { if (!IsFixed && e.ChangedButton == MouseButton.Left && e.ButtonState == MouseButtonState.Pressed) DragMove(); }
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        if (leftButtonDown || rightButtonDown) { searchPending = false; closeOnRelease = true; }
+        else Close();
+    }
     private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == 0x007B) // WM_CONTEXTMENU: this popup has no context menu.
@@ -128,4 +213,6 @@ public partial class QuoteWindow : Window
     }
     [StructLayout(LayoutKind.Sequential)] private struct WindowPosition
     { public IntPtr Hwnd, InsertAfter; public int X, Y, Width, Height; public uint Flags; }
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 }
