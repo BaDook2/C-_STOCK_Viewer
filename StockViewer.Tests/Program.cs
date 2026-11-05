@@ -35,7 +35,9 @@ public static class Program
             {
                 if (args.Contains("--right-click-check")) await RightClickCheck();
                 else if (args.Contains("--public-smoke")) await LivePublicSmoke();
-                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UnitedStatesDataTests(); await RightClickReleaseTests(); await ChordGestureTests(); await UiTests(); await UnitedStatesUiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); await SearchRecallTests(); }
+                else if (args.Contains("--quote-refresh-check")) await QuoteRefreshTests();
+                else if (args.Contains("--polling-check")) { await FastPollingTests(); await QuoteRefreshTests(); await ScopedStatusTests(); }
+                else { await CoreTests(); await TransportTests(); await PublicDataTests(); await UnitedStatesDataTests(); await FastPollingTests(); await QuoteRefreshTests(); await RightClickReleaseTests(); await ChordGestureTests(); await UiTests(); await UnitedStatesUiTests(); await AutocompleteFocusTests(); await SearchInputTests(); await WindowLifetimeTests(); await SearchRecallTests(); await ScopedStatusTests(); }
                 Console.WriteLine($"PASS: {passed} assertions; no live brokerage calls.");
             }
             catch (Exception e) { Console.Error.WriteLine(e); result = 1; }
@@ -161,31 +163,108 @@ public static class Program
         Check(first.SourceTime.HasValue && first.MarketStatus == "CLOSE" && first.Source.Contains("네이버"), "public source timestamp and closed market retained");
         Check(handler.QuoteRequests == 1 && repeated == first, "initial lookup and repeated popup share cached quote");
         Check(!handler.HadAuthorization, "public requests send no authorization or broker key");
-        Check(PublicMarketData.ReadPollingInterval(Json("{\"pollingInterval\":1000}")) == TimeSpan.FromSeconds(2), "polling has two-second minimum");
-        Check(PublicMarketData.ReadPollingInterval(Json("{\"pollingInterval\":70000}")) == TimeSpan.FromSeconds(70), "provider longer interval is honored");
+        Check(PublicMarketData.DefaultInterval == TimeSpan.FromSeconds(1), "fast polling targets one second");
+        Check(PublicMarketData.ReadPollingInterval(Json("{\"pollingInterval\":70000}")) == TimeSpan.FromSeconds(70), "provider hint is retained as metadata");
+        Check(PublicMarketData.ReadPollingInterval(Json("{\"pollingInterval\":\"bad\"}")) == TimeSpan.FromSeconds(1), "bad interval metadata cannot suppress valid prices");
         Check(PublicMarketData.ParseQuotes(Json("{\"datas\":[{},null,{\"itemCode\":\"005930\",\"closePrice\":\"0\",\"fluctuationsRatio\":\"1\"}]}")).Length == 0,
             "invalid public prices never appear as zero");
         var pollingHandler = new PublicHttpFixture();
         await using var polling = new PublicMarketData(pollingHandler);
-        var delivered = new HashSet<string>();
-        polling.QuoteReceived += q => delivered.Add(q.Code);
+        var delivered = new ConcurrentDictionary<string, Quote>();
+        polling.QuoteReceived += q => delivered[q.Code] = q;
         await polling.SetSubscriptionsAsync(["005930", "000660", "005930"]); polling.Start();
         await Until(() => delivered.Count == 2);
-        Check(pollingHandler.QuoteRequests == 1 && pollingHandler.LastBatchSize == 2, "all popups share one batched public request");
-        await Until(() => pollingHandler.QuoteRequests >= 2);
-        Check(pollingHandler.RequestTimes[1] - pollingHandler.RequestTimes[0] >= TimeSpan.FromSeconds(1.9), "public quotes refresh at the configured two-second interval");
+        Check(pollingHandler.QuoteRequests >= 1 && pollingHandler.LastBatchSize == 2, "all popups share one batched public request");
+        await Until(() => pollingHandler.RequestTimes.Count >= 2);
+        var requestTimes = pollingHandler.RequestTimes.ToArray();
+        Check(requestTimes[1] - requestTimes[0] >= TimeSpan.FromSeconds(.85), "one-second polling does not create a busy request loop");
         await polling.SetSubscriptionsAsync([]);
         var count = pollingHandler.QuoteRequests; await Task.Delay(100);
         Check(pollingHandler.QuoteRequests == count, "last popup stops public polling");
         var slowHandler = new PublicHttpFixture { Interval = 70000 };
         await using var slow = new PublicMarketData(slowHandler);
         await slow.GetSnapshotAsync("005930"); await slow.GetSnapshotAsync("005930");
-        Check(slow.PollingInterval.TotalSeconds == 70 && slowHandler.QuoteRequests == 1, "closed-market provider interval shared by snapshots");
+        Check(slow.PollingInterval.TotalSeconds == 1 && slow.ProviderPollingInterval.TotalSeconds == 70 && slowHandler.QuoteRequests == 1,
+            "closed-market hints do not delay the target cadence and duplicate snapshots still share cache");
         var limitedHandler = new PublicHttpFixture { RateLimited = true };
         await using var limited = new PublicMarketData(limitedHandler);
         await Throws<IOException>(async () => await limited.GetSnapshotAsync("005930"), "public rate limit reported");
         await Throws<IOException>(async () => await limited.GetSnapshotAsync("005930"), "rate limit cooldown applies to repeated searches");
         Check(limitedHandler.QuoteRequests == 1, "Retry-After prevents extra network calls");
+    }
+    private static async Task FastPollingTests()
+    {
+        await using (var malformed = new PublicMarketData(new PublicHttpFixture { MalformedInterval = true }))
+            Check((await malformed.GetSnapshotAsync("005930")).Price > 0, "a valid price survives invalid polling metadata");
+
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slowHandler = new PublicHttpFixture { HoldUs = hold, ChangingPrices = true };
+        await using (var independent = new PublicMarketData(slowHandler))
+        {
+            var quotes = new ConcurrentQueue<Quote>(); independent.QuoteReceived += quotes.Enqueue;
+            await independent.SetSubscriptionsAsync(["005930", "US:AAPL.O"]); independent.Start();
+            await slowHandler.UsStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await Until(() => quotes.Count(q => q.Code == "005930") >= 2);
+            Check(!hold.Task.IsCompleted && quotes.All(q => q.Code == "005930"), "a stalled US request cannot block domestic polling");
+            Check(quotes.Select(q => q.Price).Distinct().Count() >= 2, "healthy prices really change while the other market is waiting");
+            Check((await independent.GetSnapshotAsync("005930").WaitAsync(TimeSpan.FromSeconds(2))).Price > 0,
+                "a domestic snapshot remains available during a stalled US request");
+            hold.TrySetResult();
+            await Until(() => quotes.Any(q => q.Code == "US:AAPL.O"));
+            Check(true, "the stalled market resumes without restarting the service");
+            await independent.SetSubscriptionsAsync([]);
+        }
+        var snapshotHold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshotHandler = new PublicHttpFixture { HoldUs = snapshotHold };
+        await using (var snapshots = new PublicMarketData(snapshotHandler))
+        {
+            var pending = snapshots.GetSnapshotAsync("US:AAPL.O");
+            try
+            {
+                await snapshotHandler.UsStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                Check((await snapshots.GetSnapshotAsync("005930").WaitAsync(TimeSpan.FromSeconds(2))).Price > 0,
+                    "initial snapshots from different markets do not share a blocking network gate");
+            }
+            finally { snapshotHold.TrySetResult(); await pending; }
+        }
+        var partialHandler = new PublicHttpFixture { MissingCode = "000660", ChangingPrices = true };
+        await using (var partial = new PublicMarketData(partialHandler))
+        {
+            var quotes = new ConcurrentQueue<Quote>(); var statuses = new ConcurrentQueue<ConnectionStatus>();
+            partial.QuoteReceived += quotes.Enqueue; partial.StatusChanged += statuses.Enqueue;
+            await partial.SetSubscriptionsAsync(["005930", "000660"]); partial.Start();
+            await Until(() => quotes.Count(q => q.Code == "005930") >= 4);
+            Check(partialHandler.DomesticBatches.Count(batch => batch.Contains("000660")) <= 3,
+                "only the missing symbol backs off while healthy symbols keep their one-second cadence");
+            Check(statuses.All(s => s.Connected || s.Code == "000660"), "a missing symbol never marks another symbol disconnected");
+            partialHandler.MissingCode = null;
+            await Until(() => statuses.Any(s => s.Code == "000660" && s.Connected));
+            Check(quotes.Any(q => q.Code == "000660"), "a temporarily missing symbol automatically recovers without reopening its popup");
+            await partial.SetSubscriptionsAsync([]);
+        }
+        var limitedHandler = new PublicHttpFixture { RateLimited = true, RateLimitSeconds = 1 };
+        await using (var limited = new PublicMarketData(limitedHandler))
+        {
+            var delivered = new TaskCompletionSource<Quote>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var rateReported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            limited.QuoteReceived += q => delivered.TrySetResult(q);
+            limited.StatusChanged += status => { if (!status.Connected && status.Code == "005930") rateReported.TrySetResult(); };
+            await limited.SetSubscriptionsAsync(["005930"]); limited.Start();
+            await rateReported.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            limitedHandler.RateLimited = false;
+            await Throws<IOException>(async () => await limited.GetSnapshotAsync("000660"), "fast polling still obeys Retry-After for a different symbol");
+            Check(limitedHandler.QuoteRequests == 1, "subscription or snapshot requests cannot bypass the shared rate-limit cooldown");
+            await delivered.Task.WaitAsync(TimeSpan.FromSeconds(4));
+            var times = limitedHandler.RequestTimes.ToArray();
+            Check(times.Length >= 2 && times[1] - times[0] >= TimeSpan.FromSeconds(.85), "polling recovers automatically after Retry-After expires");
+            Check(limitedHandler.RequestsRevalidate && !limitedHandler.HadAuthorization, "fast requests revalidate cached responses and still use no API key");
+        }
+        var cancelHandler = new PublicHttpFixture { HoldUs = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var cancelService = new PublicMarketData(cancelHandler);
+        var canceled = cancelService.GetSnapshotAsync("US:AAPL.O");
+        await cancelHandler.UsStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await cancelService.DisposeAsync();
+        await Throws<OperationCanceledException>(async () => await canceled, "disposing the service also cancels initial snapshots without an explicit caller token");
     }
     private static JsonElement UsQuoteFrame(object? extended = null) => Json(JsonSerializer.Serialize(new
     {
@@ -232,12 +311,13 @@ public static class Program
 
         var mixedHandler = new PublicHttpFixture { UsInterval = 70000 };
         await using var mixed = new PublicMarketData(mixedHandler);
-        var delivered = new HashSet<string>(); mixed.QuoteReceived += q => delivered.Add(q.Code);
+        var delivered = new ConcurrentDictionary<string, Quote>(); mixed.QuoteReceived += q => delivered[q.Code] = q;
         await mixed.SetSubscriptionsAsync(["005930", "US:AAPL.O", "US:SPY", "US:AAPL.O"]); mixed.Start();
         await Until(() => delivered.Count == 3);
-        Check(mixedHandler.DomesticQuoteRequests == 1 && mixedHandler.UsQuoteRequests == 1 && mixedHandler.LastBatchSize == 2, "mixed markets are batched separately without duplicate subscriptions");
-        await Until(() => mixedHandler.DomesticQuoteRequests >= 2);
-        Check(mixedHandler.UsQuoteRequests == 1, "a 70-second US interval does not slow two-second domestic updates");
+        Check(mixedHandler.DomesticQuoteRequests >= 1 && mixedHandler.UsQuoteRequests >= 1
+            && mixedHandler.UsBatchSizes.All(count => count == 2), "mixed markets are batched separately without duplicate subscriptions");
+        await Until(() => mixedHandler.DomesticQuoteRequests >= 2 && mixedHandler.UsQuoteRequests >= 2);
+        Check(true, "both markets refresh rapidly even when the US provider suggests 70 seconds");
         await mixed.SetSubscriptionsAsync([]);
         var requestCount = mixedHandler.QuoteRequests; await Task.Delay(100);
         Check(mixedHandler.QuoteRequests == requestCount, "closing all mixed-market popups stops both feeds");
@@ -265,7 +345,7 @@ public static class Program
         Check(results.Any(s => s.Code == "005930"), "live public autocomplete works without a key");
         var quote = await service.GetSnapshotAsync("005930", limit.Token);
         Check(quote.Price > 0 && quote.SourceTime.HasValue, "live public quote has price and provider timestamp");
-        Check(service.PollingInterval >= TimeSpan.FromSeconds(2), "live provider polling interval respected");
+        Check(service.PollingInterval == TimeSpan.FromSeconds(1), "live requests use the one-second target");
         var english = await service.SearchAsync("AAPL", limit.Token);
         var korean = await service.SearchAsync("애플", limit.Token);
         var apple = english.Single(s => s.DisplayCode == "AAPL");
@@ -276,9 +356,47 @@ public static class Program
             var stock = result.First(s => StockCode.IsUnitedStates(s.Code));
             var usQuote = await service.GetSnapshotAsync(stock.Code, limit.Token);
             Check(usQuote.Price > 0 && usQuote.SourceTime.HasValue && usQuote.Currency == "USD", $"live US quote without credentials: {stock.DisplayCode}");
-            Console.WriteLine($"US smoke: {stock.DisplayCode}; {usQuote.Source}; market {usQuote.MarketStatus}; provider interval {service.PollingInterval.TotalSeconds:0.#}s.");
+            Console.WriteLine($"US smoke: {stock.DisplayCode}; {usQuote.Source}; market {usQuote.MarketStatus}; target {service.PollingInterval.TotalSeconds:0.#}s; provider hint {service.ProviderPollingInterval.TotalSeconds:0.#}s.");
         }
-        Console.WriteLine($"Public smoke: provider interval {service.PollingInterval.TotalSeconds:0.#}s; market {quote.MarketStatus}; no credentials used.");
+        Console.WriteLine($"Public smoke: target {service.PollingInterval.TotalSeconds:0.#}s; market {quote.MarketStatus}; no credentials used.");
+        var live = new ConcurrentQueue<Quote>(); service.QuoteReceived += live.Enqueue;
+        await service.SetSubscriptionsAsync(["005930", apple.Code], limit.Token); service.Start();
+        await Until(() => live.Count(q => q.Code == "005930") >= 3 && live.Count(q => q.Code == apple.Code) >= 3);
+        await service.SetSubscriptionsAsync([], limit.Token);
+        foreach (var code in new[] { "005930", apple.Code })
+        {
+            var samples = live.Where(q => q.Code == code).OrderBy(q => q.ReceivedAt).Take(3).ToArray();
+            Check(samples.Length == 3 && samples[2].ReceivedAt > samples[0].ReceivedAt, $"live background polling repeatedly receives {code}");
+            Console.WriteLine($"Live cadence {code}: {(samples[2].ReceivedAt - samples[0].ReceivedAt).TotalSeconds / 2:0.000}s average; source {samples[2].SourceTime:O}; received {samples[2].ReceivedAt:O}.");
+        }
+    }
+    private static Task QuoteRefreshTests()
+    {
+        var popup = new QuoteWindow(new("US:AAPL.O", "애플", "NASDAQ", "AAPL"), true);
+        try
+        {
+            popup.SetConnection(new("connected", true));
+            var received = DateTimeOffset.UtcNow;
+            var source = received.AddSeconds(-5);
+            popup.ApplyQuote(new("US:AAPL.O", 123.45m, 1, received, "160001", Source: "네이버 공개 시세 · NASDAQ", SourceTime: source, Currency: "USD"));
+            popup.ApplyQuote(new("US:AAPL.O", 124, 2, received.AddSeconds(1), Source: "네이버 공개 시세 · NASDAQ", Currency: "USD"));
+            Check(popup.DisplayedPrice == "$124.00" && popup.LastQuote?.SourceTime is null,
+                "a new public price still updates when its response temporarily omits the trade timestamp");
+            Check(popup.StatusMessage.Contains("수신") && popup.StatusMessage.Contains("NASDAQ"), "timestamp-free quotes show their source and receive time");
+            popup.ApplyQuote(new("US:AAPL.O", 1, 0, received.AddSeconds(2), "155900", Source: "네이버 공개 시세 · NASDAQ", SourceTime: source.AddSeconds(-1), Currency: "USD"));
+            Check(popup.DisplayedPrice == "$124.00", "the last known trade timestamp still rejects stale data after a timestamp-free response");
+            Check(popup.StatusMessage.Contains(received.AddSeconds(2).ToOffset(TimeSpan.FromHours(9)).ToString("HH:mm:ss")),
+                "receive time advances even when an older trade snapshot correctly leaves the price unchanged");
+            popup.ApplyQuote(new("US:AAPL.O", 2, 0, received.AddSeconds(-1), Source: "네이버 공개 시세 · NASDAQ", Currency: "USD"));
+            Check(popup.DisplayedPrice == "$124.00", "an older cached response cannot overwrite a newer timestamp-free price");
+            popup.ApplyQuote(new("US:AAPL.O", 125, 3, received.AddSeconds(3), "160002", Source: "네이버 공개 시세 · NASDAQ", SourceTime: source.AddSeconds(1), Currency: "USD"));
+            Check(popup.DisplayedPrice == "$125.00" && popup.StatusMessage.Contains("수신"), "normal timestamped updates resume and keep the receive-time indication");
+            popup.ResetQuote();
+            popup.ApplyQuote(new("US:AAPL.O", 126, 4, received, Source: "네이버 공개 시세 · NASDAQ", SourceTime: source.AddDays(-1), Currency: "USD"));
+            Check(popup.DisplayedPrice == "$126.00", "resetting a service clears the previous source-time guard");
+        }
+        finally { popup.Close(); }
+        return Task.CompletedTask;
     }
     private static async Task UiTests()
     {
@@ -431,7 +549,7 @@ public static class Program
             "replacing a US popup captures its name preference and preserves the domestic popup");
         handler.MissingCode = "SPY";
         var unavailable = (await main.OpenStockAsync(catalog.Single(s => s.Code == "US:SPY")))!;
-        Check(unavailable.IsVisible && unavailable.LastQuote is null && unavailable.StatusMessage.Contains("조회 실패"),
+        Check(unavailable.IsVisible && unavailable.LastQuote is null && unavailable.StatusMessage.Contains("조회"),
             "a missing US price leaves an error popup instead of crashing the search window");
         unavailable.Close(); handler.MissingCode = null;
         SaveImage(replacement, "quote-us-price-only.png");
@@ -695,6 +813,28 @@ public static class Program
             "the XAML mouse-down and mouse-up handlers route a complete chord and consume both buttons");
         dragged.Close();
     }
+    private static async Task ScopedStatusTests()
+    {
+        var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-status-" + Guid.NewGuid().ToString("N")));
+        var handler = new PublicHttpFixture { ChangingPrices = true };
+        var main = new MainWindow(store, false);
+        main.Show(); await main.UseServiceAsync(new PublicMarketData(handler), DemoMarketData.SampleStocks);
+        var healthy = (await main.OpenStockAsync(DemoMarketData.SampleStocks[0]))!;
+        var missing = (await main.OpenStockAsync(DemoMarketData.SampleStocks[1]))!;
+        var healthyCard = (Border)healthy.FindName("Card"); var missingCard = (Border)missing.FindName("Card");
+        await Until(() => healthy.LastQuote is not null && missing.LastQuote is not null && healthyCard.Opacity == 1 && missingCard.Opacity == 1);
+        handler.MissingCode = "000660";
+        await Until(() => missingCard.Opacity < 1);
+        var previous = healthy.LastQuote!.ReceivedAt;
+        await Until(() => healthy.LastQuote!.ReceivedAt > previous);
+        Check(healthyCard.Opacity == 1 && missingCard.Opacity < 1, "only the failed popup dims while another popup keeps receiving fresh prices");
+        healthy.SetConnection(new("unrelated failure", Code: "000660"));
+        Check(healthyCard.Opacity == 1, "a popup independently rejects another symbol's connection status");
+        handler.MissingCode = null;
+        await Until(() => missingCard.Opacity == 1);
+        Check(missing.LastQuote is not null && healthyCard.Opacity == 1, "the failed popup returns to normal when its own quotes recover");
+        main.Close(); healthy.Close(); missing.Close(); await Idle();
+    }
     private static async Task SearchRecallTests()
     {
         var store = new SettingsStore(Path.Combine(Path.GetTempPath(), "StockViewer-recall-" + Guid.NewGuid().ToString("N")));
@@ -883,13 +1023,20 @@ public static class Program
     {
         public int QuoteRequests, LastBatchSize, DomesticQuoteRequests, UsQuoteRequests;
         public int Interval = 2000, UsInterval = 2000;
-        public bool HadAuthorization, RateLimited, FailDomestic;
-        public string? MissingCode;
-        public List<DateTimeOffset> RequestTimes { get; } = [];
-        public List<string> RequestedPaths { get; } = [];
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        public volatile bool HadAuthorization, RateLimited, FailDomestic, ChangingPrices, MalformedInterval;
+        public volatile bool RequestsRevalidate = true;
+        public volatile string? MissingCode;
+        public double RateLimitSeconds = 30;
+        public TaskCompletionSource? HoldUs;
+        public TaskCompletionSource UsStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ConcurrentQueue<DateTimeOffset> RequestTimes { get; } = [];
+        public ConcurrentQueue<string> RequestedPaths { get; } = [];
+        public ConcurrentQueue<int> UsBatchSizes { get; } = [];
+        public ConcurrentQueue<string[]> DomesticBatches { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             HadAuthorization |= request.Headers.Authorization is not null;
+            if (request.Headers.CacheControl?.NoCache != true) RequestsRevalidate = false;
             var uri = request.RequestUri!;
             object body;
             if (uri.Host == "ac.stock.naver.com")
@@ -907,25 +1054,33 @@ public static class Program
                 body = new { stocks = new[] { new { itemCode = uri.AbsolutePath.Contains("KOSDAQ") ? "196170" : "005930", stockName = "검색 종목" } } };
             else if (uri.Host == "polling.finance.naver.com")
             {
-                QuoteRequests++; RequestTimes.Add(DateTimeOffset.UtcNow); RequestedPaths.Add(uri.AbsolutePath);
+                var requestNumber = Interlocked.Increment(ref QuoteRequests);
+                RequestTimes.Enqueue(DateTimeOffset.UtcNow); RequestedPaths.Enqueue(uri.AbsolutePath);
                 var us = uri.AbsolutePath.Contains("/worldstock/");
-                if (us) UsQuoteRequests++; else DomesticQuoteRequests++;
+                if (us) Interlocked.Increment(ref UsQuoteRequests); else Interlocked.Increment(ref DomesticQuoteRequests);
                 if (RateLimited)
                 {
                     var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-                    limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(30));
-                    return Task.FromResult(limited);
+                    limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(RateLimitSeconds));
+                    return limited;
                 }
-                if (!us && FailDomestic) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                if (us)
+                {
+                    UsStarted.TrySetResult();
+                    if (HoldUs is { } hold) await hold.Task.WaitAsync(cancellation);
+                }
+                if (!us && FailDomestic) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
                 var codes = Uri.UnescapeDataString(uri.Segments.Last()).Split(','); LastBatchSize = codes.Length;
-                body = new { pollingInterval = us ? UsInterval : Interval, datas = codes.Where(code => code != MissingCode).Select(code => new {
-                    itemCode = us ? "" : code, reutersCode = us ? code : "", closePrice = us ? "123.45" : "72,500",
+                if (us) UsBatchSizes.Enqueue(codes.Length); else DomesticBatches.Enqueue(codes);
+                var price = ChangingPrices ? ((us ? 123.45m : 72500m) + requestNumber).ToString(System.Globalization.CultureInfo.InvariantCulture) : us ? "123.45" : "72,500";
+                body = new { pollingInterval = MalformedInterval ? (object)"bad" : us ? UsInterval : Interval, datas = codes.Where(code => code != MissingCode).Select(code => new {
+                    itemCode = us ? "" : code, reutersCode = us ? code : "", closePrice = price,
                     fluctuationsRatio = "1.25", compareToPreviousPrice = new { code = "5" },
                     stockExchangeType = new { name = us ? "NASDAQ" : "KRX", delayTime = 0 }, currencyType = new { code = us ? "USD" : "KRW" },
                     localTradedAt = "2026-10-30T15:30:00+09:00", marketStatus = "CLOSE" }).ToArray() };
             }
             else throw new Exception("Unexpected public host.");
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") });
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
         }
     }
     private sealed class FakeSocket : IQuoteSocket

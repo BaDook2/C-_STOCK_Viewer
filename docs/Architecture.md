@@ -8,7 +8,11 @@
 
 시작 → PublicMarketData → 캐시와 공개 기본 목록 → 입력 디바운스/취소 → 공개 자동완성 → 코드별 QuoteWindow → 공통 배치 폴링 → Dispatcher → 가격 갱신.
 
-Quote는 공개 제공처·기준 시각·장 상태를 보존합니다. 종목별 다음 허용 조회 시각을 공유하고, 초기 조회와 정기 폴링의 중복을 막습니다. 기본 2초보다 긴 제공처 pollingInterval과 HTTP Retry-After를 우선합니다.
+Quote는 공개 제공처·기준 시각·실제 수신 시각·장 상태를 보존합니다. PublicMarketData의 MarketState를 국내·미국으로 분리하고 각각의 Gate·Wake·캐시·다음 조회 시각·오류·연속 실패 횟수를 관리합니다. 두 작업은 ThreadPool에서 독립 실행하며 초기 조회도 같은 시장의 게이트와 캐시를 공유합니다. 목표 간격은 1초이고 요청 시작 시점을 기준으로 다음 시각을 계산합니다. pollingInterval은 참고 메타데이터로만 보관하며 실제 HTTP Retry-After는 준수합니다.
+
+시세 누락이나 실패 시 해당 종목의 NextFetch만 1·2·4·8·10초로 늦추며, 정상 종목은 계속 갱신합니다. ConnectionStatus.Code로 연결 상태를 종목에만 전달해 다른 가격 창이 흐려지지 않게 합니다. 캐시를 새 팝업에 반환할 때 마지막 연결 상태도 재전달합니다. HTTP 제한 시간은 5초이며 GetJsonAsync와 GetSnapshotAsync는 서비스 lifetime을 호출자 토큰에 연결합니다. 조회·JSON 처리는 ConfigureAwait(false)를 사용하고 UI 반영은 종료 상태를 확인하는 DispatchFromService를 거칩니다.
+
+QuoteWindow는 마지막으로 확인한 체결 시각과 최근 HTTP 응답 수신 시각을 별도로 보존합니다. 공개 시세의 체결 시각이 잠시 빠져도 최신 수신 가격은 반영하며, 뒤늦게 온 오래된 체결 시각이나 캐시가 최신 가격을 덮지 않게 합니다. 레거시 KRX 틱과 스냅샷의 구분은 그 경로에만 적용합니다. 가격을 보존한 경우에도 툴팁의 수신 시각은 실제 응답에 맞춰 갱신합니다.
 
 미국 종목의 내부 Code는 `US:`와 검색 응답의 reutersCode를 결합합니다. `US:AAPL.O`, `US:SPY`, `US:BRKb`처럼 저장하여 국내 6자리 코드와 충돌하지 않게 하고, 요청할 때만 접두사를 제거합니다. Stock.Symbol/DisplayCode는 화면의 티커와 정규화 검색에 사용합니다. 기존 국내 목록 캐시와 Quote 생성자의 기본 KRW 통화를 유지합니다. 레거시 키움 서비스는 국내 코드만 허용합니다.
 

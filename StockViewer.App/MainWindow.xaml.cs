@@ -127,12 +127,11 @@ public partial class MainWindow : Window
         if (previous is not null) await previous.DisposeAsync();
         if (closing) { await client.DisposeAsync(); return; }
         foreach (var popup in popups.Values) popup.ResetQuote();
-        client.QuoteReceived += quote => Dispatcher.BeginInvoke(() =>
+        client.QuoteReceived += quote => DispatchFromService(client, () =>
         {
-            if (!closing && ReferenceEquals(service, client) && popups.TryGetValue(quote.Code, out var popup)) popup.ApplyQuote(quote);
+            if (popups.TryGetValue(quote.Code, out var popup)) popup.ApplyQuote(quote);
         });
-        client.StatusChanged += status => Dispatcher.BeginInvoke(() =>
-        { if (!closing && ReferenceEquals(service, client)) ShowStatus(status); });
+        client.StatusChanged += status => DispatchFromService(client, () => ShowStatus(status));
         ShowStatus(new(client.IsDemo ? "데모 모드 · 예시 가격" : "공개 시세 연결 · API 키 불필요", client.IsDemo, client.IsDemo));
         client.Start();
         await UpdateSubscriptionsAsync();
@@ -147,8 +146,25 @@ public partial class MainWindow : Window
     }
     private void ShowStatus(ConnectionStatus status)
     {
+        if (status.Code is { } code)
+        {
+            if (popups.TryGetValue(code, out var popup)) popup.SetConnection(status);
+            return;
+        }
         connection = status;
         foreach (var popup in popups.Values) popup.SetConnection(status);
+    }
+    private void DispatchFromService(IMarketDataService client, Action action)
+    {
+        if (closing || !ReferenceEquals(service, client) || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        try
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!closing && ReferenceEquals(service, client)) action();
+            });
+        }
+        catch (InvalidOperationException) when (closing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { }
     }
     private async Task UpdateSubscriptionsAsync()
     {

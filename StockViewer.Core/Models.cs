@@ -23,7 +23,7 @@ public static class StockCode
 public sealed record Quote(string Code, decimal Price, decimal ChangePercent, DateTimeOffset ReceivedAt,
     string? TradeTime = null, bool IsDemo = false, string Source = "KRX", DateTimeOffset? SourceTime = null, string? MarketStatus = null,
     string Currency = "KRW");
-public sealed record ConnectionStatus(string Message, bool Connected = false, bool IsDemo = false);
+public sealed record ConnectionStatus(string Message, bool Connected = false, bool IsDemo = false, string? Code = null);
 public sealed record ApiCredentials(string AppKey, string SecretKey, bool IsMock = false)
 {
     public void Validate()

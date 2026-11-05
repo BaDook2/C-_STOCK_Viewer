@@ -22,6 +22,7 @@ public partial class QuoteWindow : Window
     private bool leftButtonDown, rightButtonDown, closeOnRelease, closeQueued, closed;
     private bool searchPending, searchDispatchQueued, resetRightClickCount, leftDragging;
     private Point dragStartScreen, dragStartWindowPixels;
+    private DateTimeOffset? latestSourceTime, lastResponseAt;
     private ConnectionStatus status = new("시세 연결 대기");
     public QuoteWindow(Stock stock, bool showName)
     {
@@ -48,9 +49,17 @@ public partial class QuoteWindow : Window
     }
     public void ApplyQuote(Quote quote)
     {
-        if (quote.Code != Stock.Code || LastQuote is { TradeTime: not null } && quote.TradeTime is null && !quote.IsDemo) return;
-        if (LastQuote?.SourceTime is { } last && quote.SourceTime is { } current && current < last) return;
+        if (quote.Code != Stock.Code) return;
+        if (!lastResponseAt.HasValue || quote.ReceivedAt > lastResponseAt) lastResponseAt = quote.ReceivedAt;
+        // Only legacy broker snapshots lack a timestamp by design. Public quotes
+        // may temporarily omit it and must not freeze a valid new price forever.
+        if (LastQuote is { Source: "KRX", TradeTime: not null, SourceTime: null, IsDemo: false }
+            && quote is { Source: "KRX", TradeTime: null, SourceTime: null, IsDemo: false }) { RefreshStatus(); return; }
+        if (latestSourceTime is { } last && quote.SourceTime is { } current && current < last) { RefreshStatus(); return; }
+        if (LastQuote is { } previous && quote.ReceivedAt < previous.ReceivedAt
+            && (quote.SourceTime is null || previous.SourceTime is null || quote.SourceTime <= previous.SourceTime)) { RefreshStatus(); return; }
         LastQuote = quote;
+        if (quote.SourceTime.HasValue) latestSourceTime = quote.SourceTime;
         PriceText.Text = quote.Currency == "USD"
             ? "$" + quote.Price.ToString("#,##0.00##", CultureInfo.InvariantCulture)
             : quote.Price.ToString("N0", CultureInfo.GetCultureInfo("ko-KR")) + "원";
@@ -60,28 +69,38 @@ public partial class QuoteWindow : Window
         PriceText.Foreground = brush; PercentText.Foreground = brush;
         RefreshStatus();
     }
-    public void SetConnection(ConnectionStatus connection) { status = connection; RefreshStatus(); }
+    public void SetConnection(ConnectionStatus connection)
+    {
+        if (connection.Code is not null && connection.Code != Stock.Code) return;
+        status = connection; RefreshStatus();
+    }
     public void ShowError(string message)
     { SetStatus(message); Card.Opacity = LastQuote is null ? 1 : .55; }
     public void ResetQuote()
-    { LastQuote = null; PriceText.Text = "—"; PercentText.Text = "—"; PriceText.Foreground = PercentText.Foreground = (Brush)FindResource("TextMutedBrush"); RefreshStatus(); }
+    { LastQuote = null; latestSourceTime = lastResponseAt = null; PriceText.Text = "—"; PercentText.Text = "—"; PriceText.Foreground = PercentText.Foreground = (Brush)FindResource("TextMutedBrush"); RefreshStatus(); }
     private void SetStatus(string message)
     { StatusMessage = message; Card.ToolTip = message + $"\n{(IsFixed ? "Fix" : "Free")} · 우클릭: 고정 전환 · 우클릭 두 번: 닫기\n좌우 버튼 동시 클릭: 근처에 검색창 표시"; }
     private void RefreshStatus()
     {
         Card.Opacity = status.Connected || LastQuote is null ? 1 : .55;
         if (LastQuote is { IsDemo: true }) { SetStatus("DEMO · 예시 가격 · 실제 시세 아님"); return; }
-        if (!status.Connected) { SetStatus(LastQuote is null ? status.Message : "연결 끊김 · 마지막 수신 가격"); return; }
+        if (!status.Connected)
+        {
+            SetStatus(LastQuote is null ? status.Message : status.Message + " · 마지막 수신 가격 "
+                + (lastResponseAt ?? LastQuote.ReceivedAt).ToOffset(TimeSpan.FromHours(9)).ToString("HH:mm:ss"));
+            return;
+        }
         if (LastQuote is null) { SetStatus("시세를 불러오고 있어요…"); return; }
+        var received = " · 수신 " + (lastResponseAt ?? LastQuote.ReceivedAt).ToOffset(TimeSpan.FromHours(9)).ToString("HH:mm:ss");
         if (LastQuote.SourceTime is { } sourceTime)
         {
             SetStatus(LastQuote.Source + (LastQuote.MarketStatus == "CLOSE" ? " · 장 마감" : "")
-                + " · 기준 " + sourceTime.ToOffset(TimeSpan.FromHours(9)).ToString("MM.dd HH:mm:ss"));
+                + " · 기준 " + sourceTime.ToOffset(TimeSpan.FromHours(9)).ToString("MM.dd HH:mm:ss") + received);
             return;
         }
         var time = LastQuote.TradeTime;
-        SetStatus(time is { Length: 6 } ? $"KRX · 최근 체결 {time[..2]}:{time[2..4]}:{time[4..]}"
-            : "KRX · 최근 조회 " + LastQuote.ReceivedAt.ToOffset(TimeSpan.FromHours(9)).ToString("HH:mm:ss"));
+        SetStatus(time is { Length: 6 } ? $"{LastQuote.Source} · 최근 체결 {time[..2]}:{time[2..4]}:{time[4..]}" + received
+            : LastQuote.Source + received + " · 체결 시각 미제공");
     }
     public void ProcessMouseDown(MouseButton button, int clickCount = 1, bool otherButtonPressed = false)
     {

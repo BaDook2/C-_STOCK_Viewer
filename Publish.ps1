@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')]
-    [string]$Version = '1.1.1',
+    [string]$Version = '1.1.2',
     [string]$OutputDirectory = 'publish',
     [switch]$SkipRootCopy
 )
