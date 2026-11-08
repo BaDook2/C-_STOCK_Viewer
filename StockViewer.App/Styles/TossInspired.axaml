@@ -1,0 +1,102 @@
+<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Styles.Resources>
+    <SolidColorBrush x:Key="CanvasBrush" Color="#F7F8FA" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#F2F4F6" />
+    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EDF1F5" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#191F28" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4E5968" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#8B95A1" />
+    <SolidColorBrush x:Key="LineBrush" Color="#E5E8EB" />
+    <SolidColorBrush x:Key="BlueBrush" Color="#3182F6" />
+    <SolidColorBrush x:Key="BlueSoftBrush" Color="#E8F3FF" />
+    <SolidColorBrush x:Key="RedBrush" Color="#F04452" />
+  </Styles.Resources>
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="Segoe UI, Malgun Gothic, Apple SD Gothic Neo, Noto Sans CJK KR, sans-serif" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    <Setter Property="UseLayoutRounding" Value="True" />
+  </Style>
+  <Style Selector="TextBlock"><Setter Property="FontSize" Value="13" /></Style>
+  <Style Selector="Button">
+    <Setter Property="Foreground" Value="White" /><Setter Property="Background" Value="{StaticResource BlueBrush}" />
+    <Setter Property="Padding" Value="15,8" /><Setter Property="Cursor" Value="Hand" />
+    <Setter Property="BorderThickness" Value="0" /><Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" /><Setter Property="MinWidth" Value="0" /><Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" /><Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" /><Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="Template"><ControlTemplate>
+      <Border Name="Box" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+      </Border>
+    </ControlTemplate></Setter>
+  </Style>
+  <Style Selector="Button:pointerover /template/ Border#Box"><Setter Property="Opacity" Value="0.85" /></Style>
+  <Style Selector="Button:pressed /template/ Border#Box"><Setter Property="Opacity" Value="0.7" /></Style>
+  <Style Selector="Button:focus-visible /template/ Border#Box"><Setter Property="BoxShadow" Value="0 0 8 0 #593182F6" /></Style>
+  <Style Selector="Button:disabled"><Setter Property="Opacity" Value="0.45" /><Setter Property="Cursor" Value="Arrow" /></Style>
+  <Style Selector="Button.icon">
+    <Setter Property="Background" Value="Transparent" /><Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+    <Setter Property="Width" Value="24" /><Setter Property="Height" Value="22" /><Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="TextBox">
+    <Setter Property="Padding" Value="9,4" /><Setter Property="FontSize" Value="12" />
+    <Setter Property="MinWidth" Value="0" /><Setter Property="MinHeight" Value="0" />
+    <Setter Property="CornerRadius" Value="10" /><Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+    <Setter Property="BorderThickness" Value="1" /><Setter Property="Background" Value="White" />
+    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" /><Setter Property="CaretBrush" Value="{StaticResource BlueBrush}" />
+    <Setter Property="SelectionBrush" Value="#663182F6" /><Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template"><ControlTemplate>
+      <Border Name="Shell" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+        <ScrollViewer Name="PART_ScrollViewer" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden">
+          <TextPresenter Name="PART_TextPresenter" Text="{TemplateBinding Text, Mode=TwoWay}"
+                         CaretBlinkInterval="{TemplateBinding CaretBlinkInterval}" CaretIndex="{TemplateBinding CaretIndex}"
+                         SelectionStart="{TemplateBinding SelectionStart}" SelectionEnd="{TemplateBinding SelectionEnd}"
+                         TextAlignment="{TemplateBinding TextAlignment}" TextWrapping="{TemplateBinding TextWrapping}"
+                         LineHeight="{TemplateBinding LineHeight}" LetterSpacing="{TemplateBinding LetterSpacing}"
+                         SelectionBrush="{TemplateBinding SelectionBrush}" SelectionForegroundBrush="{TemplateBinding SelectionForegroundBrush}"
+                         CaretBrush="{TemplateBinding CaretBrush}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                         VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </ScrollViewer>
+      </Border>
+    </ControlTemplate></Setter>
+  </Style>
+  <Style Selector="TextBox:pointerover"><Setter Property="BorderBrush" Value="{StaticResource LineBrush}" /><Setter Property="Background" Value="White" /></Style>
+  <Style Selector="TextBox:focus"><Setter Property="BorderBrush" Value="{StaticResource BlueBrush}" /><Setter Property="BorderThickness" Value="1" /><Setter Property="Background" Value="White" /></Style>
+  <Style Selector="CheckBox">
+    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" /><Setter Property="FontSize" Value="11" />
+    <Setter Property="MinWidth" Value="0" /><Setter Property="MinHeight" Value="0" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="Cursor" Value="Hand" /><Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template"><ControlTemplate>
+      <Grid ColumnDefinitions="Auto,*">
+        <Border Name="CheckBoxBox" Width="19" Height="19" CornerRadius="5" BorderBrush="#C9D0D7" BorderThickness="1.4" Background="White">
+          <Path Name="CheckMark" Data="M 3 8 L 7 12 L 14 4" Stroke="White" StrokeThickness="2" IsVisible="False" />
+        </Border>
+        <ContentPresenter Name="PART_ContentPresenter" Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
+                          Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+      </Grid>
+    </ControlTemplate></Setter>
+  </Style>
+  <Style Selector="CheckBox:checked /template/ Border#CheckBoxBox"><Setter Property="Background" Value="{StaticResource BlueBrush}" /><Setter Property="BorderBrush" Value="{StaticResource BlueBrush}" /></Style>
+  <Style Selector="CheckBox:checked /template/ Path#CheckMark"><Setter Property="IsVisible" Value="True" /></Style>
+  <Style Selector="CheckBox:pointerover /template/ Border#CheckBoxBox"><Setter Property="BorderBrush" Value="{StaticResource BlueBrush}" /></Style>
+  <Style Selector="ListBoxItem">
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="6,6" />
+    <Setter Property="MinHeight" Value="0" /><Setter Property="Focusable" Value="False" /><Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template"><ControlTemplate>
+      <Border Name="Row" CornerRadius="8" Padding="{TemplateBinding Padding}" Background="Transparent">
+        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+      </Border>
+    </ControlTemplate></Setter>
+  </Style>
+  <Style Selector="ListBoxItem:pointerover /template/ Border#Row"><Setter Property="Background" Value="{StaticResource SurfaceSubtleBrush}" /></Style>
+  <Style Selector="ListBoxItem:selected /template/ Border#Row"><Setter Property="Background" Value="{StaticResource BlueSoftBrush}" /></Style>
+  <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" /><Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+</Styles>

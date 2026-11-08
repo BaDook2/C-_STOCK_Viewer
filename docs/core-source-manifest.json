@@ -1,0 +1,27 @@
+{
+  "sourceRoot": "C:\\Users\\wkdru\\Desktop\\C#\\StockViewer",
+  "sourceCommit": "e8379d1",
+  "copiedAt": "2026-11-08",
+  "files": [
+    {
+      "path": "StockViewer.Core/DemoMarketData.cs",
+      "sha256": "8B009132BC38DB050FEC32B77F456DF14D8839F4155595A4D4B9C7D5DC4518CE"
+    },
+    {
+      "path": "StockViewer.Core/KiwoomClient.cs",
+      "sha256": "88052F1BDFD2AAF92152D198DD0983A62D9118ED5E692A405A785DB569139615"
+    },
+    {
+      "path": "StockViewer.Core/Models.cs",
+      "sha256": "057EA0218362EECE7AF52EF520719E72A875F6C783BBA65EB7C9EC5BF5A83CA3"
+    },
+    {
+      "path": "StockViewer.Core/PublicMarketData.cs",
+      "sha256": "28DD2B90F1FBFF9123B756E4BB6A55A229CC6C09A946B69832A07B7C460C45FF"
+    },
+    {
+      "path": "StockViewer.Core/StockViewer.Core.csproj",
+      "sha256": "3472FCCCE5613343D3B55F6C2BBC48CBFD3DE01F9CF32FD8607B8AC3A7E26395"
+    }
+  ]
+}

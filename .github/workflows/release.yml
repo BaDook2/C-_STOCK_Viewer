@@ -71,10 +71,15 @@ jobs:
           dotnet build StockViewer.slnx -c Release --no-restore
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
-      - name: Run offline regression checks
+      - name: Run headless Avalonia regression checks
         run: |
-          dotnet StockViewer.Tests/bin/Release/net10.0-windows/StockViewer.Tests.dll
+          dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll
           if ($LASTEXITCODE -ne 0) { throw 'Regression checks failed.' }
+
+      - name: Run native Windows window checks
+        run: |
+          dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --native --ui-only
+          if ($LASTEXITCODE -ne 0) { throw 'Native window checks failed.' }
 
       - name: Publish standalone Windows x64 EXE
         env:
@@ -111,7 +116,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: WPF-diagnostics
+          name: Avalonia-diagnostics
           path: artifacts/ui/*.png
           if-no-files-found: ignore
           retention-days: 7
@@ -142,11 +147,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $taskHash = (Get-FileHash -LiteralPath release/StockViewer.exe -Algorithm SHA256).Hash
           $taskNotes = @"
-          Windows x64용 STOCK MINI입니다.
+          StockViewer — 국내·미국 주식과 ETF를 작은 한 줄 팝업으로 확인하는 Avalonia 데스크톱 앱입니다.
 
           Assets의 StockViewer.exe 하나만 다운로드하여 실행하세요.
           별도 설치, .NET 설치, 증권사 API 키가 필요하지 않습니다.
           공개 시세 조회를 위한 인터넷 연결은 필요합니다.
+
+          v2.0.0은 WPF를 Avalonia로 교체하고 프로젝트와 실행 파일 이름을 StockViewer로 통일한 버전입니다.
+          작은 검색 창과 가격 팝업의 기존 디자인·조작을 유지합니다.
 
           국내·미국 주식과 ETF를 한글 이름 또는 티커로 검색할 수 있습니다.
           미국 가격은 달러로 표시하며, 최신 장전·장후 시세가 제공되면 전일 대비 등락률을 계산합니다.
@@ -158,5 +166,5 @@ jobs:
           SHA-256: $taskHash
           "@
           $taskNotes | Set-Content -LiteralPath release-notes.md -Encoding utf8
-          gh release create $env:RELEASE_TAG release/StockViewer.exe --repo $env:GH_REPO --verify-tag --title "STOCK MINI $env:RELEASE_TAG" --notes-file release-notes.md --latest
+          gh release create $env:RELEASE_TAG release/StockViewer.exe --repo $env:GH_REPO --verify-tag --title "StockViewer $env:RELEASE_TAG" --notes-file release-notes.md --latest
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed. Existing published versions are not overwritten.' }

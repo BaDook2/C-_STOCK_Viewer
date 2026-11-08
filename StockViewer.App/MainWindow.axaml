@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="using:StockViewer.Core" x:Class="StockViewer.Desktop.MainWindow"
+        Title="StockViewer" Width="286" Height="80" MinWidth="0" MinHeight="0" WindowStartupLocation="CenterScreen"
+        WindowDecorations="None" CanResize="False" TransparencyLevelHint="Transparent" Background="Transparent">
+  <Border Name="SearchCard" Margin="4" CornerRadius="8" Background="{StaticResource CanvasBrush}"
+          BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="9,3,9,8">
+    <Grid RowDefinitions="22,5,30">
+      <Grid Background="Transparent">
+        <Border Name="DragArea" Background="Transparent" PointerPressed="DragHeader" />
+        <CheckBox Name="DisplayName" FontSize="11" IsChecked="True" HorizontalAlignment="Left"
+                  VerticalAlignment="Center" Click="DisplayNameChanged" ToolTip.Tip="이후 새로 여는 팝업에 종목 이름을 표시합니다.">
+          <TextBlock Text="종목이름 Display" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" />
+        </CheckBox>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button Name="MinimizeButton" Classes="icon" Click="Minimize" ToolTip.Tip="최소화" AutomationProperties.Name="최소화">
+            <TextBlock Text="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="9" />
+          </Button>
+          <Button Name="CloseButton" Classes="icon" ClickMode="Press" Click="CloseApp"
+                  ToolTip.Tip="검색창 닫기 · 가격 팝업은 유지" AutomationProperties.Name="검색창 닫기">
+            <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="9" />
+          </Button>
+        </StackPanel>
+      </Grid>
+      <Grid Grid.Row="2" ColumnDefinitions="*,6,46">
+        <Grid>
+          <TextBox Name="SearchBox" KeyDown="SearchKeyDown" LostFocus="SearchUnfocused"
+                   AutomationProperties.Name="종목 이름 또는 코드" ToolTip.Tip="국내·미국 종목 이름·코드·티커·초성 입력 후 Enter" />
+          <TextBlock Name="SearchPlaceholder" Text="종목 검색" FontSize="12" Foreground="{StaticResource TextMutedBrush}"
+                     Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+        </Grid>
+        <Button Name="SearchButton" Grid.Column="2" FontSize="12" Padding="8,4" Click="SearchClicked"
+                ToolTip.Tip="선택한 종목의 가격 팝업 열기"><TextBlock Text="검색" FontSize="13" /></Button>
+        <Popup Name="Suggestions" PlacementTarget="{Binding #SearchBox}" Placement="Bottom" IsLightDismissEnabled="False"
+               Topmost="False" TakesFocusFromNativeControl="False" WindowManagerAddShadowHint="False">
+          <Border Background="White" CornerRadius="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                  Padding="3" Margin="0,3,0,0" Width="{Binding #SearchBox.Bounds.Width}">
+            <StackPanel>
+              <ListBox Name="SearchResults" MaxHeight="160" BorderThickness="0" Padding="0" Background="Transparent"
+                       Focusable="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       AutomationProperties.Name="종목 검색 결과">
+                <ListBox.ItemTemplate><DataTemplate DataType="core:Stock">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                    <TextBlock Grid.Column="1" Text="{Binding DisplayCode}" FontSize="10" Foreground="{StaticResource TextMutedBrush}"
+                               VerticalAlignment="Center" Margin="7,0,0,0" />
+                  </Grid>
+                </DataTemplate></ListBox.ItemTemplate>
+              </ListBox>
+              <TextBlock Name="NoResults" Text="검색 결과 없음" FontSize="11" Margin="7,9"
+                         Foreground="{StaticResource TextMutedBrush}" IsVisible="False" />
+            </StackPanel>
+          </Border>
+        </Popup>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>
