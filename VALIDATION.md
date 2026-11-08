@@ -41,3 +41,10 @@
 - README·구조·배포·시세 문서를 현재 프로그램 기준으로 정리함. 별도 시험판 설정 폴더의 표시 설정과 검색 캐시는 새 경로에 파일이 없을 때만 이전하며 기존 설정·원본 키 파일은 변경하지 않음.
 - 설정 이전 회귀 검증 5개 추가: 표시 설정·검색 캐시 이전, 키 파일 미복사, 기존 설정 미덮어쓰기, 이전 사용자 파일 유지.
 - 이름 변경 후 Release 빌드 경고 0/오류 0, 헤드리스 231개·Windows 네이티브 116개·실제 공개 시세 10개 검증 통과. 실제 연속 수신 간격은 삼성전자 1.003초, 애플 1.008초였으며 확인 시점은 장 마감 상태임.
+- Git 이력과 origin을 확인해 .git을 보존한 뒤 기존 WPF 폴더를 삭제하고 StockViewer_avalonia를 StockViewer로 이동 완료함. 이전 폴더와 이전 이름의 실행 파일은 남아 있지 않으며 현재 소스에 WPF 프로젝트 참조가 없음을 확인함.
+- v2.0.0 Release 게시 완료: https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v2.0.0
+- Actions 성공: https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42434406454. Avalonia Release 빌드·헤드리스 회귀·Windows 창 검증·단일 EXE 시작 확인·Release 첨부를 통과함.
+- GitHub 저장소 소개를 현재 Avalonia 프로그램 설명으로 갱신했고 README와 릴리즈 본문도 같은 기능을 설명하도록 정리함. 최신 Release가 v2.0.0임을 별도 조회로 확인함.
+- 실제 첨부 StockViewer.exe의 GitHub digest·크기·버전 일치를 확인하고 파일 하나만 있는 폴더에서 5초 시작 확인을 통과함. 프로젝트 루트·publish 실행 파일은 실제 Release 파일로 교체하고 체크섬 일치를 확인함.
+- 크기 48,688,056 bytes, 제품 버전 2.0.0+0b33da980cbbdfc112e3ec85918b1d12b8d9a30d.
+- SHA256: 01A9F409E21BD184DBBB6EDD0B3314C24E91EC69A2ACE2BA1675193D0A391900.
