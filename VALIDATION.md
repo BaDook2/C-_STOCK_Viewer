@@ -82,3 +82,13 @@
 - 선택된 가격창의 테두리를 1에서 2 DIP로 두껍게 변경함. 안쪽 여백을 같은 양만큼 줄여 높이·너비·글자 위치를 유지하며, hover 색상·선택 색상은 기존의 옅은 파란색을 사용함. 선택 상태는 접근성 창 제목에도 표시함.
 - 로컬 빌드 경고 0/오류 0, UI·입력 회귀 283개 및 Mac 실제 창 219개 통과. 패키지의 네이티브 모듈 아키텍처·번들 서명·압축 해제 후 시작 검사를 통과함.
 - CUA의 앱 내부 입력이 전역 마우스 감지기로 전달되지 않는 제한을 분리 확인함. 수정 앱을 실행하고 기존 20개 배치를 복원한 뒤 사용자가 실제 마우스로 바탕화면 드래그 선택이 정상 동작함을 확인함. 진단 앱과 임시 입력 검사 코드는 정리하고 현재 실행 앱 하나만 유지함.
+
+
+# v2.2.0 정식 릴리즈 · 2026-11-10
+
+- 사용자 요청으로 [최종 플랫폼 검증](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42786195208)을 확인한 뒤 [릴리즈 workflow](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42786709404)를 실행함. Windows·Apple Silicon·Intel Mac 전체 회귀 각 411개, 실제 창 검증 Windows 223개·Mac 각 219개 통과.
+- 세 플랫폼의 패키징 및 Windows EXE 단독 시작·Mac ZIP 압축 해제 후 시작을 통과한 뒤 [v2.2.0](https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v2.2.0)을 정식 최신 릴리즈로 게시함. 태그 대상 커밋은 490db6b675fb0cc4ce3d370acbff4b785aa8dd50.
+- 실제 첨부 파일을 다시 내려받아 SHA256SUMS 및 GitHub asset digest·크기를 대조함. Windows PE x64와 두 Mac 앱·바탕화면 선택 모듈의 CPU 아키텍처, 버전 2.2.0, Mac 번들 서명 검사를 통과함. 검증된 다운로드 파일은 outputs/v2.2.0에 보관함.
+- SHA-256 Windows EXE: 682b57df0e08f2f284dff29b723132427a0bb4180b3d3489b5ce905a9d1aaa48.
+- SHA-256 Mac arm64 ZIP: fb9530eaec9ff663f3e825c1d548233e3f4c9d1b88c64ea39ecad76d21569876.
+- SHA-256 Mac x64 ZIP: 5c9bb88cd5e332e897e1ad7595cabde5e55789ad46ede49304f135048b63cd7c.
