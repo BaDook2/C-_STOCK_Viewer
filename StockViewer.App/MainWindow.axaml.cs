@@ -13,6 +13,9 @@ namespace StockViewer.Desktop;
 public partial class MainWindow : Window
 {
     private readonly SettingsStore settings;
+    private readonly PopupSelection selection = new(observeDesktop: true);
+    internal PopupSelection Selection => selection;
+    public IReadOnlyCollection<QuoteWindow> SelectedPopups => selection.Selected;
     private readonly Dictionary<string, QuoteWindow> popups = [];
     private readonly Dictionary<string, PendingOpen> pendingOpens = [];
     private DataDelayWindow? dataDelayNotice;
@@ -96,6 +99,7 @@ public partial class MainWindow : Window
         dataDelayNotice?.Close();
         layoutNotice?.Close();
         foreach (var popup in popups.Values.ToArray()) popup.Close();
+        selection.Dispose();
         try { if (service is not null) await service.DisposeAsync(); }
         finally
         {
@@ -256,7 +260,7 @@ public partial class MainWindow : Window
     private QuoteWindow CreateQuoteWindow(Stock stock, bool showName, Quote quote, ConnectionStatus status, PopupState? placement)
     {
         if (popups.Remove(stock.Code, out var old)) old.Close();
-        var popup = new QuoteWindow(stock, showName);
+        var popup = new QuoteWindow(stock, showName, selection);
         popups[stock.Code] = popup; popup.SearchRequested += ShowSearchNearQuote;
         popup.Closed += async (_, _) =>
         {

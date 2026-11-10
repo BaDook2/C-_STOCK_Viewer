@@ -25,6 +25,10 @@ def main():
         executable = bundle / "Contents/MacOS" / info["CFBundleExecutable"]
         architecture = "arm64" if args.runtime == "osx-arm64" else "x86_64"
         subprocess.run(["lipo", str(executable), "-verify_arch", architecture], check=True)
+        desktop_observer = bundle / "Contents/MacOS/libStockViewerDesktop.dylib"
+        if not desktop_observer.is_file():
+            raise SystemExit("Desktop selection module is missing")
+        subprocess.run(["lipo", str(desktop_observer), "-verify_arch", architecture], check=True)
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(bundle)], check=True)
         if not (bundle / "Contents/MacOS/libhostfxr.dylib").is_file():
             raise SystemExit("Self-contained runtime is missing")

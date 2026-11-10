@@ -2,7 +2,13 @@
         x:Class="StockViewer.Desktop.QuoteWindow" Height="32" MaxHeight="32" MinWidth="0" MinHeight="32" SizeToContent="Width"
         WindowDecorations="None" CanResize="False" CanMinimize="False" CanMaximize="False" TransparencyLevelHint="Transparent" Background="Transparent"
         WindowStartupLocation="Manual" ShowInTaskbar="False" KeyDown="PopupKeyDown">
-  <Border Name="Card" Margin="2" CornerRadius="5" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}"
+  <Window.Styles>
+    <Style Selector="Border#Card"><Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" /></Style>
+    <Style Selector="Border#Card.selected, Border#Card:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource PopupOutlineBrush}" />
+    </Style>
+  </Window.Styles>
+  <Border Name="Card" Margin="2" CornerRadius="5" Background="{DynamicResource SurfaceBrush}"
           BorderThickness="1" Padding="8,3">
     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
       <TextBlock Name="StockName" FontSize="12" MaxWidth="104" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" VerticalAlignment="Center" />

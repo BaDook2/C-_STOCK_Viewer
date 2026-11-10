@@ -18,6 +18,15 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
   </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <Content Include="$(IntermediateOutputPath)native/libStockViewerDesktop.dylib" Link="libStockViewerDesktop.dylib"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+  <Target Name="BuildMacDesktopObserver" BeforeTargets="PrepareForBuild" Condition="$([MSBuild]::IsOSPlatform('OSX'))"
+          Inputs="Native/DesktopSelection.m;../scripts/build_desktop_observer.py"
+          Outputs="$(IntermediateOutputPath)native/libStockViewerDesktop.dylib">
+    <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/../scripts/build_desktop_observer.py&quot; --runtime &quot;$(RuntimeIdentifier)&quot; --output &quot;$(IntermediateOutputPath)native/libStockViewerDesktop.dylib&quot;" />
+  </Target>
   <Target Name="OmitNativeDebugSymbols" AfterTargets="ComputeFilesToPublish">
     <ItemGroup><ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" /></ItemGroup>
   </Target>

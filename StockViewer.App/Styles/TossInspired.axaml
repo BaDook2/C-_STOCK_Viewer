@@ -11,6 +11,7 @@
           <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4E5968" />
           <SolidColorBrush x:Key="TextMutedBrush" Color="#8B95A1" />
           <SolidColorBrush x:Key="LineBrush" Color="#E5E8EB" />
+          <SolidColorBrush x:Key="PopupOutlineBrush" Color="#8FBCF7" />
           <SolidColorBrush x:Key="BlueBrush" Color="#3182F6" />
           <SolidColorBrush x:Key="BlueSoftBrush" Color="#E8F3FF" />
           <SolidColorBrush x:Key="RedBrush" Color="#F04452" />
@@ -29,6 +30,7 @@
           <SolidColorBrush x:Key="TextSecondaryBrush" Color="#CCD4DF" />
           <SolidColorBrush x:Key="TextMutedBrush" Color="#8B98AA" />
           <SolidColorBrush x:Key="LineBrush" Color="#354154" />
+          <SolidColorBrush x:Key="PopupOutlineBrush" Color="#5679A6" />
           <SolidColorBrush x:Key="BlueBrush" Color="#78A9FF" />
           <SolidColorBrush x:Key="BlueSoftBrush" Color="#253B60" />
           <SolidColorBrush x:Key="RedBrush" Color="#FF7B82" />

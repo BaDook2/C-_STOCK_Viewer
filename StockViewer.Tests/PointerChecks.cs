@@ -16,6 +16,7 @@ internal static partial class Program
     private static async Task PointerPipelineTests()
     {
         await HoverAppearanceTests();
+        await PointerSelectionTests();
         foreach (var first in new[] { MouseButton.Left, MouseButton.Right })
         foreach (var releaseFirst in new[] { MouseButton.Left, MouseButton.Right })
         {
