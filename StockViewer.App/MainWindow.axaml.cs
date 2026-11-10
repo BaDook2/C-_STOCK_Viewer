@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Automation;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using StockViewer.Core;
@@ -31,6 +33,10 @@ public partial class MainWindow : Window
         stocks = settings.LoadCatalog();
         if (stocks.Count == 0) stocks = DemoMarketData.SampleStocks;
         InitializeComponent();
+        if (Application.Current is { } app)
+            app.RequestedThemeVariant = settings.LoadDarkMode() ? ThemeVariant.Dark : ThemeVariant.Light;
+        ActualThemeVariantChanged += (_, _) => UpdateThemeButton();
+        UpdateThemeButton();
         DisplayName.IsChecked = settings.LoadDisplayName(); initialized = true;
         SearchBox.PropertyChanged += (_, e) =>
         { if (e.Property == TextBox.TextProperty && !suppressSearch) RefreshSuggestions(true); };
@@ -117,6 +123,7 @@ public partial class MainWindow : Window
     public async Task UseServiceAsync(IMarketDataService client, IReadOnlyList<Stock> catalog)
     {
         if (closing) { await client.DisposeAsync(); return; }
+        if (client is PublicMarketData publicData) publicData.RegisterStocks(catalog);
         CancelPendingSearch(); session.Cancel(); session.Dispose(); session = new();
         var previous = service; service = client; stocks = catalog;
         if (previous is not null) await previous.DisposeAsync();
@@ -173,12 +180,15 @@ public partial class MainWindow : Window
             else await UpdateSubscriptionsAsync();
         };
         popup.SetConnection(connection);
-        popup.Measure(Size.Infinity); PopupPlacement.BelowSearch(popup, this);
-        popup.Show(); PopupPlacement.BelowSearch(popup, this); DismissSuggestions();
+        // Showing first initializes the native size. Measuring an unopened macOS
+        // window can otherwise leave its client area at 0x0 until it is closed.
+        popup.Show(); PopupPlacement.BelowSearch(popup, this, popups.Values); DismissSuggestions();
+        var initialPosition = popup.Position;
         await UpdateSubscriptionsAsync();
         if (service is { } currentService) await LoadQuoteAsync(popup, currentService, session.Token);
         else popup.ShowError("시세 연결을 기다리는 중입니다.");
-        if (!searchHidden && popup.IsVisible && !popup.IsFixed) PopupPlacement.BelowSearch(popup, this);
+        if (!searchHidden && popup.IsVisible && !popup.IsFixed && popup.Position == initialPosition)
+            PopupPlacement.BelowSearch(popup, this, popups.Values);
         return popup;
     }
     private async Task LoadQuoteAsync(QuoteWindow popup, IMarketDataService client, CancellationToken cancellation)
@@ -282,6 +292,23 @@ public partial class MainWindow : Window
         try { settings.SaveDisplayName(DisplayName.IsChecked == true); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { ShowStatus(new("표시 설정을 저장하지 못했습니다.", connection.Connected, connection.IsDemo)); }
+    }
+    private void UpdateThemeButton()
+    {
+        var dark = ActualThemeVariant == ThemeVariant.Dark;
+        MoonIcon.IsVisible = !dark; SunIcon.IsVisible = dark;
+        var action = dark ? "라이트 모드로 전환" : "다크 모드로 전환";
+        ToolTip.SetTip(ThemeButton, action); AutomationProperties.SetName(ThemeButton, action);
+    }
+    private void ToggleTheme(object? sender, RoutedEventArgs e)
+    {
+        if (Application.Current is not { } app) return;
+        var dark = app.ActualThemeVariant != ThemeVariant.Dark;
+        app.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
+        UpdateThemeButton();
+        try { settings.SaveDarkMode(dark); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { ShowStatus(new("테마 설정을 저장하지 못했습니다.", connection.Connected, connection.IsDemo)); }
     }
     private void DragHeader(object? sender, PointerPressedEventArgs e)
     { if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { e.Handled = true; DismissSuggestions(); BeginMoveDrag(e); } }

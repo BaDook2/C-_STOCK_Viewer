@@ -16,6 +16,7 @@ public partial class QuoteWindow : Window
     public bool IsFixed { get; private set; }
     public bool NameVisible => StockName.IsVisible;
     public Quote? LastQuote { get; private set; }
+    public bool IsMarketClosed => LastQuote is { MarketStatus: "CLOSE" or "CLOSED", IsDemo: false };
     public string DisplayedPrice => PriceText.Text ?? "";
     public string StatusMessage { get; private set; } = "시세 연결 대기";
     public event EventHandler? SearchRequested;
@@ -30,6 +31,8 @@ public partial class QuoteWindow : Window
     {
         InitializeComponent(); Stock = stock;
         StockName.Text = stock.Name; ToolTip.SetTip(StockName, stock.Name); SetNameVisible(showName);
+        ActualThemeVariantChanged += (_, _) => RefreshQuoteColors();
+        RefreshQuoteColors();
         AddHandler(PointerPressedEvent, PopupPointerPressed, RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, PopupPointerReleased, RoutingStrategies.Tunnel);
         AddHandler(PointerMovedEvent, PopupPointerMoved, RoutingStrategies.Tunnel);
@@ -61,22 +64,37 @@ public partial class QuoteWindow : Window
     { StockName.IsVisible = visible; Title = visible ? Stock.Name + " · StockViewer" : "StockViewer"; }
     public void SetFixed(bool enabled)
     { fixedPosition = Position; IsFixed = enabled; Topmost = enabled; SetStatus(StatusMessage); }
-    private IBrush ResourceBrush(string key) => (IBrush)this.FindResource(key)!;
+    private IBrush ResourceBrush(string key) => (IBrush)this.FindResource(ActualThemeVariant, key)!;
+    private void RefreshQuoteColors()
+    {
+        StockName.Foreground = ResourceBrush(IsMarketClosed ? "TextMutedBrush" : "TextPrimaryBrush");
+        var key = LastQuote is null || IsMarketClosed ? "TextMutedBrush"
+            : LastQuote.ChangePercent > 0 ? "RedBrush" : LastQuote.ChangePercent < 0 ? "BlueBrush" : "TextSecondaryBrush";
+        PriceText.Foreground = PercentText.Foreground = ResourceBrush(key);
+    }
+    private void PreservePriceAndUpdateSession(Quote response, bool latestResponse)
+    {
+        if (latestResponse && LastQuote is { } previous && response.MarketStatus is "OPEN" or "CLOSE" or "CLOSED")
+            LastQuote = previous with { MarketStatus = response.MarketStatus };
+        RefreshStatus();
+    }
     public void ApplyQuote(Quote quote)
     {
         if (quote.Code != Stock.Code) return;
+        var latestResponse = !lastResponseAt.HasValue || quote.ReceivedAt >= lastResponseAt;
         if (!lastResponseAt.HasValue || quote.ReceivedAt > lastResponseAt) lastResponseAt = quote.ReceivedAt;
         if (LastQuote is { Source: "KRX", TradeTime: not null, SourceTime: null, IsDemo: false }
-            && quote is { Source: "KRX", TradeTime: null, SourceTime: null, IsDemo: false }) { RefreshStatus(); return; }
-        if (latestSourceTime is { } last && quote.SourceTime is { } current && current < last) { RefreshStatus(); return; }
+            && quote is { Source: "KRX", TradeTime: null, SourceTime: null, IsDemo: false }) { PreservePriceAndUpdateSession(quote, latestResponse); return; }
+        if (latestSourceTime is { } last && quote.SourceTime is { } current && current < last) { PreservePriceAndUpdateSession(quote, latestResponse); return; }
         if (LastQuote is { } previous && quote.ReceivedAt < previous.ReceivedAt
-            && (quote.SourceTime is null || previous.SourceTime is null || quote.SourceTime <= previous.SourceTime)) { RefreshStatus(); return; }
+            && (quote.SourceTime is null || previous.SourceTime is null || quote.SourceTime <= previous.SourceTime)) { PreservePriceAndUpdateSession(quote, latestResponse); return; }
+        if (!latestResponse && LastQuote is { } retained)
+            quote = quote with { MarketStatus = retained.MarketStatus };
         LastQuote = quote;
         if (quote.SourceTime.HasValue) latestSourceTime = quote.SourceTime;
         PriceText.Text = quote.Currency == "USD" ? "$" + quote.Price.ToString("#,##0.00##", CultureInfo.InvariantCulture)
             : quote.Price.ToString("N0", CultureInfo.GetCultureInfo("ko-KR")) + "원";
         PercentText.Text = $"{(quote.ChangePercent > 0 ? "+" : "")}{quote.ChangePercent:0.00}%";
-        PriceText.Foreground = PercentText.Foreground = ResourceBrush(quote.ChangePercent > 0 ? "RedBrush" : quote.ChangePercent < 0 ? "BlueBrush" : "TextSecondaryBrush");
         RefreshStatus();
     }
     public void SetConnection(ConnectionStatus connection)
@@ -85,7 +103,7 @@ public partial class QuoteWindow : Window
     public void ResetQuote()
     {
         LastQuote = null; latestSourceTime = lastResponseAt = null; PriceText.Text = PercentText.Text = "—";
-        PriceText.Foreground = PercentText.Foreground = ResourceBrush("TextMutedBrush"); RefreshStatus();
+        RefreshStatus();
     }
     private void SetStatus(string message)
     {
@@ -94,6 +112,7 @@ public partial class QuoteWindow : Window
     }
     private void RefreshStatus()
     {
+        RefreshQuoteColors();
         Card.Opacity = status.Connected || LastQuote is null ? 1 : .55;
         if (LastQuote is { IsDemo: true }) { SetStatus("DEMO · 예시 가격 · 실제 시세 아님"); return; }
         if (!status.Connected)

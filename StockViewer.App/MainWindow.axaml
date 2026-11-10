@@ -2,22 +2,41 @@
         xmlns:core="using:StockViewer.Core" x:Class="StockViewer.Desktop.MainWindow"
         Title="StockViewer" Width="286" Height="80" MinWidth="0" MinHeight="0" WindowStartupLocation="CenterScreen"
         WindowDecorations="None" CanResize="False" TransparencyLevelHint="Transparent" Background="Transparent">
-  <Border Name="SearchCard" Margin="4" CornerRadius="8" Background="{StaticResource CanvasBrush}"
-          BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="9,3,9,8">
+  <Border Name="SearchCard" Margin="4" CornerRadius="8" Background="{DynamicResource CanvasBrush}"
+          BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="9,3,9,8">
     <Grid RowDefinitions="22,5,30">
       <Grid Background="Transparent">
         <Border Name="DragArea" Background="Transparent" PointerPressed="DragHeader" />
         <CheckBox Name="DisplayName" FontSize="11" IsChecked="True" HorizontalAlignment="Left"
                   VerticalAlignment="Center" Click="DisplayNameChanged" ToolTip.Tip="이후 새로 여는 팝업에 종목 이름을 표시합니다.">
-          <TextBlock Text="종목이름 Display" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" />
+          <TextBlock Text="종목이름 Display" FontSize="13" Foreground="{DynamicResource TextSecondaryBrush}" />
         </CheckBox>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button Name="ThemeButton" Classes="icon" Click="ToggleTheme" ToolTip.Tip="다크 모드로 전환"
+                  AutomationProperties.Name="다크 모드로 전환">
+            <Grid Width="16" Height="16">
+              <Canvas Name="MoonIcon" Width="16" Height="16">
+                <Path Data="M 13,9 A 6,6 0 1 1 7,3 A 4.5,4.5 0 0 0 13,9 Z"
+                      Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.4" />
+              </Canvas>
+              <Canvas Name="SunIcon" Width="16" Height="16" IsVisible="False">
+                <Ellipse Width="6" Height="6" Canvas.Left="5" Canvas.Top="5"
+                         Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.4" />
+                <Path Data="M 8,1 L 8,3 M 8,13 L 8,15 M 1,8 L 3,8 M 13,8 L 15,8 M 3,3 L 4.4,4.4 M 11.6,11.6 L 13,13 M 3,13 L 4.4,11.6 M 11.6,4.4 L 13,3"
+                      Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.4" StrokeLineCap="Round" />
+              </Canvas>
+            </Grid>
+          </Button>
           <Button Name="MinimizeButton" Classes="icon" Click="Minimize" ToolTip.Tip="최소화" AutomationProperties.Name="최소화">
-            <TextBlock Text="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="9" />
+            <Canvas Width="16" Height="16">
+              <Path Data="M 3,8 L 13,8" Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
+            </Canvas>
           </Button>
           <Button Name="CloseButton" Classes="icon" ClickMode="Press" Click="CloseApp"
                   ToolTip.Tip="검색창 닫기 · 가격 팝업은 유지" AutomationProperties.Name="검색창 닫기">
-            <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="9" />
+            <Canvas Width="16" Height="16">
+              <Path Data="M 4,4 L 12,12 M 12,4 L 4,12" Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
+            </Canvas>
           </Button>
         </StackPanel>
       </Grid>
@@ -25,14 +44,14 @@
         <Grid>
           <TextBox Name="SearchBox" KeyDown="SearchKeyDown" LostFocus="SearchUnfocused"
                    AutomationProperties.Name="종목 이름 또는 코드" ToolTip.Tip="국내·미국 종목 이름·코드·티커·초성 입력 후 Enter" />
-          <TextBlock Name="SearchPlaceholder" Text="종목 검색" FontSize="12" Foreground="{StaticResource TextMutedBrush}"
+          <TextBlock Name="SearchPlaceholder" Text="종목 검색" FontSize="12" Foreground="{DynamicResource TextMutedBrush}"
                      Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
         </Grid>
         <Button Name="SearchButton" Grid.Column="2" FontSize="12" Padding="8,4" Click="SearchClicked"
                 ToolTip.Tip="선택한 종목의 가격 팝업 열기"><TextBlock Text="검색" FontSize="13" /></Button>
         <Popup Name="Suggestions" PlacementTarget="{Binding #SearchBox}" Placement="Bottom" IsLightDismissEnabled="False"
                Topmost="False" TakesFocusFromNativeControl="False" WindowManagerAddShadowHint="False">
-          <Border Background="White" CornerRadius="8" BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+          <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
                   Padding="3" Margin="0,3,0,0" Width="{Binding #SearchBox.Bounds.Width}">
             <StackPanel>
               <ListBox Name="SearchResults" MaxHeight="160" BorderThickness="0" Padding="0" Background="Transparent"
@@ -41,13 +60,13 @@
                 <ListBox.ItemTemplate><DataTemplate DataType="core:Stock">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
-                    <TextBlock Grid.Column="1" Text="{Binding DisplayCode}" FontSize="10" Foreground="{StaticResource TextMutedBrush}"
+                    <TextBlock Grid.Column="1" Text="{Binding DisplayCode}" FontSize="10" Foreground="{DynamicResource TextMutedBrush}"
                                VerticalAlignment="Center" Margin="7,0,0,0" />
                   </Grid>
                 </DataTemplate></ListBox.ItemTemplate>
               </ListBox>
               <TextBlock Name="NoResults" Text="검색 결과 없음" FontSize="11" Margin="7,9"
-                         Foreground="{StaticResource TextMutedBrush}" IsVisible="False" />
+                         Foreground="{DynamicResource TextMutedBrush}" IsVisible="False" />
             </StackPanel>
           </Border>
         </Popup>

@@ -1,92 +1,110 @@
-name: Release Windows EXE
+name: Release Windows and macOS
 run-name: Release ${{ inputs.tag || github.ref_name }}
 
-on:
+'on':
   push:
-    tags:
-      - 'v[0-9]*'
+    branches: [main]
+    paths: ['.github/release-version']
+    tags: ['v[0-9]*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing version tag, for example v1.0.0'
-        required: true
+        description: 'Existing tag, or leave empty to release the version in .github/release-version'
+        required: false
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build and verify single EXE
-    runs-on: windows-latest
-    timeout-minutes: 20
+  prepare:
+    name: Validate release version
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      DOTNET_NOLOGO: true
-      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      commit: ${{ steps.version.outputs.commit }}
     steps:
-      - name: Check out version tag
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Validate release version and commit
-        id: version
+      - id: version
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          if ($env:RELEASE_TAG -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-            throw 'Use an existing version tag such as v1.0.0.'
-          }
-          $taskTagCommit = git rev-parse --verify "refs/tags/$env:RELEASE_TAG^{commit}"
-          if ($LASTEXITCODE -ne 0) { throw 'The version tag does not exist.' }
-          $taskHead = git rev-parse HEAD
-          if ($taskHead -ne $taskTagCommit) { throw 'Checkout does not match the release tag.' }
-          "tag=$env:RELEASE_TAG" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
-          "version=$($env:RELEASE_TAG.Substring(1))" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          python3 - <<'PY'
+          import os, pathlib, re, subprocess, xml.etree.ElementTree as ET
+          version = pathlib.Path('.github/release-version').read_text().strip()
+          if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
+              raise SystemExit('Invalid release version')
+          tag = os.environ.get('REQUESTED_TAG') or (os.environ['GITHUB_REF_NAME'] if os.environ['GITHUB_REF_TYPE'] == 'tag' else 'v' + version)
+          if tag != 'v' + version or ET.parse('StockViewer.App/StockViewer.App.csproj').findtext('.//Version') != version:
+              raise SystemExit('Tag, project and release manifest must have the same version')
+          if not pathlib.Path('docs/releases/' + tag + '.md').is_file():
+              raise SystemExit('Release notes are missing')
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tagged = subprocess.run(['git', 'rev-parse', '--verify', 'refs/tags/' + tag + '^{commit}'], capture_output=True, text=True)
+          if tagged.returncode == 0 and tagged.stdout.strip() != commit:
+              raise SystemExit('Existing version tag points to another commit')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'tag={tag}\nversion={version}\ncommit={commit}\n')
+          PY
 
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+  build:
+    name: Build and verify ${{ matrix.runtime }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+          - os: macos-15
+            runtime: osx-arm64
+          - os: macos-15-intel
+            runtime: osx-x64
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-
-      - name: Restore
+      - name: Restore and build
         run: |
           dotnet restore StockViewer.slnx
           if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
-
-      - name: Build Release
-        run: |
           dotnet build StockViewer.slnx -c Release --no-restore
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
-
-      - name: Run headless Avalonia regression checks
+      - name: Run headless regressions
         run: |
           dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll
           if ($LASTEXITCODE -ne 0) { throw 'Regression checks failed.' }
-
-      - name: Run native Windows window checks
+      - name: Run native window checks
         run: |
           dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --native --ui-only
           if ($LASTEXITCODE -ne 0) { throw 'Native window checks failed.' }
-
-      - name: Publish standalone Windows x64 EXE
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: ./Publish.ps1 -Version $env:RELEASE_VERSION -OutputDirectory release -SkipRootCopy
-
+      - name: Publish Windows standalone EXE
+        if: runner.os == 'Windows'
+        run: ./Publish.ps1 -Version $env:RELEASE_VERSION -Runtime win-x64 -OutputDirectory release -SkipRootCopy
       - name: Verify EXE-only startup
+        if: runner.os == 'Windows'
         run: |
           $ErrorActionPreference = 'Stop'
           $taskSmokeDirectory = Join-Path $env:RUNNER_TEMP "StockViewer-exe-only-$env:GITHUB_RUN_ID"
@@ -95,76 +113,71 @@ jobs:
           Copy-Item -LiteralPath release/StockViewer.exe -Destination $taskExecutable
           $taskProcess = Start-Process -FilePath $taskExecutable -WorkingDirectory $taskSmokeDirectory -WindowStyle Hidden -PassThru
           try {
-            if ($taskProcess.WaitForExit(5000)) {
-              throw "The standalone EXE exited unexpectedly: $($taskProcess.ExitCode)"
-            }
+            if ($taskProcess.WaitForExit(5000)) { throw "Standalone EXE exited unexpectedly: $($taskProcess.ExitCode)" }
           } finally {
             if (-not $taskProcess.HasExited) { Stop-Process -Id $taskProcess.Id -Force }
           }
-          (Get-FileHash -LiteralPath release/StockViewer.exe -Algorithm SHA256).Hash | Write-Output
-
-      - name: Upload verified EXE
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        env:
+          RELEASE_RUNTIME: ${{ matrix.runtime }}
+        run: |
+          python3 scripts/publish_macos.py --version $env:RELEASE_VERSION --runtime $env:RELEASE_RUNTIME --output release
+          if ($LASTEXITCODE -ne 0) { throw 'macOS package failed.' }
+      - name: Verify extracted macOS app startup
+        if: runner.os == 'macOS'
+        env:
+          RELEASE_RUNTIME: ${{ matrix.runtime }}
+        run: |
+          python3 scripts/smoke_macos.py --runtime $env:RELEASE_RUNTIME --version $env:RELEASE_VERSION --directory release
+          if ($LASTEXITCODE -ne 0) { throw 'macOS bundle startup failed.' }
+      - name: Upload verified binaries
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: StockViewer-windows-x64
-          path: release/StockViewer.exe
+          name: release-${{ matrix.runtime }}
+          path: |
+            release/StockViewer.exe
+            release/StockViewer-macOS-*.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-
       - name: Upload UI diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Avalonia-diagnostics
+          name: UI-${{ matrix.runtime }}
           path: artifacts/ui/*.png
           if-no-files-found: ignore
           retention-days: 7
 
   release:
-    name: Publish GitHub Release
-    needs: build
-    runs-on: windows-latest
+    name: Publish Windows and Mac downloads
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
-    defaults:
-      run:
-        shell: pwsh
     steps:
-      - name: Download verified EXE
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: StockViewer-windows-x64
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
           path: release
-
-      - name: Attach EXE to versioned Release
+          merge-multiple: true
+      - name: Publish verified release with checksums
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $taskHash = (Get-FileHash -LiteralPath release/StockViewer.exe -Algorithm SHA256).Hash
-          $taskNotes = @"
-          StockViewer — 국내·미국 주식과 ETF를 작은 한 줄 팝업으로 확인하는 Avalonia 데스크톱 앱입니다.
-
-          Assets의 StockViewer.exe 하나만 다운로드하여 실행하세요.
-          별도 설치, .NET 설치, 증권사 API 키가 필요하지 않습니다.
-          공개 시세 조회를 위한 인터넷 연결은 필요합니다.
-
-          v2.0.0은 WPF를 Avalonia로 교체하고 프로젝트와 실행 파일 이름을 StockViewer로 통일한 버전입니다.
-          작은 검색 창과 가격 팝업의 기존 디자인·조작을 유지합니다.
-
-          국내·미국 주식과 ETF를 한글 이름 또는 티커로 검색할 수 있습니다.
-          미국 가격은 달러로 표시하며, 최신 장전·장후 시세가 제공되면 전일 대비 등락률을 계산합니다.
-          가격 팝업에서 좌우 버튼을 동시에 클릭하면 검색 창을 근처에 표시하거나 이동합니다.
-
-          조회 목표는 1초이며 실제 새 가격의 제공 시점과 통신 지연에 따라 반영 속도가 달라질 수 있습니다.
-          한 종목의 오류는 다른 종목 갱신에 영향을 주지 않도록 분리하고 HTTP 요청 제한은 준수합니다.
-
-          SHA-256: $taskHash
-          "@
-          $taskNotes | Set-Content -LiteralPath release-notes.md -Encoding utf8
-          gh release create $env:RELEASE_TAG release/StockViewer.exe --repo $env:GH_REPO --verify-tag --title "StockViewer $env:RELEASE_TAG" --notes-file release-notes.md --latest
-          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed. Existing published versions are not overwritten.' }
+          set -euo pipefail
+          (cd release && sha256sum StockViewer.exe StockViewer-macOS-arm64.zip StockViewer-macOS-x64.zip > SHA256SUMS.txt)
+          cp "docs/releases/$RELEASE_TAG.md" release-notes.md
+          printf '\nSHA-256:\n\n```text\n' >> release-notes.md
+          cat release/SHA256SUMS.txt >> release-notes.md
+          printf '```\n' >> release-notes.md
+          gh release create "$RELEASE_TAG" release/StockViewer.exe release/StockViewer-macOS-arm64.zip release/StockViewer-macOS-x64.zip release/SHA256SUMS.txt --repo "$GH_REPO" --target "$RELEASE_COMMIT" --title "StockViewer $RELEASE_TAG" --notes-file release-notes.md --latest

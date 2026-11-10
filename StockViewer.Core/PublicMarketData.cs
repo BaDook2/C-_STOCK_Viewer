@@ -8,6 +8,7 @@ namespace StockViewer.Core;
 public sealed class PublicMarketData : IMarketDataService, IStockSearchService
 {
     private readonly HttpClient http;
+    private readonly UnitedStatesDayMarket? dayMarket;
     private readonly CancellationTokenSource lifetime = new();
     private readonly MarketState domestic = new(false), unitedStates = new(true);
     private readonly object lifecycleGate = new();
@@ -21,13 +22,17 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
     public event Action<Quote>? QuoteReceived;
     public event Action<ConnectionStatus>? StatusChanged;
 
-    public PublicMarketData(HttpMessageHandler? handler = null)
+    public PublicMarketData(HttpMessageHandler? handler = null, HttpMessageHandler? dayMarketHandler = null, TimeProvider? dayMarketClock = null)
     {
+        // A supplied primary fixture remains isolated from the external network.
+        if (handler is null || dayMarketHandler is not null) dayMarket = new(dayMarketHandler, dayMarketClock);
         http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(5) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("StockViewer/1.0");
         http.DefaultRequestHeaders.CacheControl = new() { NoCache = true };
         http.DefaultRequestHeaders.Pragma.ParseAdd("no-cache");
     }
+    public void RegisterStocks(IEnumerable<Stock> stocks)
+    { foreach (var stock in stocks) dayMarket?.Register(stock); }
     private async Task<JsonElement> GetJsonAsync(string uri, CancellationToken cancellation)
     {
         var blockedUntil = Interlocked.Read(ref retryAfterTicks);
@@ -97,7 +102,8 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                 if (StockCode.IsUnitedStates(code)) result.Add(new(code, name, market, symbol));
             }
         }
-        return result.DistinctBy(s => s.Code).Take(12).ToArray();
+        var stocks = result.DistinctBy(s => s.Code).Take(12).ToArray();
+        RegisterStocks(stocks); return stocks;
     }
     public static TimeSpan ReadPollingInterval(JsonElement root)
     {
@@ -142,32 +148,50 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                     if (exchange.TryGetProperty("delayTime", out var delay) && int.TryParse(delay.ToString(), out var minutes) && minutes > 0)
                         source += $" · {minutes}분 지연";
                 }
-                if (unitedStates && sourceTime.HasValue && row.TryGetProperty("overMarketPriceInfo", out var extended)
-                    && extended.ValueKind == JsonValueKind.Object)
+                if (!unitedStates && KiwoomParser.Text(row, "marketSessionType") == "afterMarket")
+                    source += " · 애프터마켓";
+                // A regular close is not the end of trading: NXT and US extended
+                // sessions report their own price and status in the same response.
+                var regularPrice = price;
+                var openSession = marketStatus == "OPEN";
+                var closedSession = marketStatus is "CLOSE" or "CLOSED";
+                foreach (var field in new[] { "overMarketPriceInfo", "nxtOverMarketPriceInfo" })
                 {
+                    if (!row.TryGetProperty(field, out var extended) || extended.ValueKind != JsonValueKind.Object) continue;
+                    var tradingSession = KiwoomParser.Text(extended, "tradingSessionType");
+                    if (tradingSession is not ("PRE_MARKET" or "REGULAR_MARKET" or "AFTER_MARKET")) continue;
+                    if (unitedStates && tradingSession == "REGULAR_MARKET") continue;
+                    var extendedStatus = KiwoomParser.Text(extended, "overMarketStatus");
+                    openSession |= extendedStatus == "OPEN";
+                    closedSession |= extendedStatus is "CLOSE" or "CLOSED";
+                    // Status is independent of whether a new trade/valid price has
+                    // arrived. Opening/closing must also update an unchanged quote.
                     try
                     {
-                        var session = KiwoomParser.Text(extended, "tradingSessionType");
                         var extendedTime = ReadSourceTime(extended);
+                        if (!extendedTime.HasValue || sourceTime.HasValue && extendedTime < sourceTime) continue;
+                        if (extendedTime == sourceTime && (extendedStatus != "OPEN" || marketStatus == "OPEN")) continue;
                         var extendedPrice = KiwoomParser.Number(extended, "overPrice");
-                        if (session is "PRE_MARKET" or "AFTER_MARKET" && extendedTime > sourceTime && extendedPrice > 0)
+                        if (extendedPrice <= 0) continue;
+                        decimal extendedPercent;
+                        if (unitedStates)
                         {
-                            // Premarket follows the previous session's regular close. After-hours
-                            // follows today's close, so reconstruct the previous day's close.
-                            // The extended feed's own percentage uses a different base.
-                            var previousClose = session == "PRE_MARKET" ? price
-                                : price - ApplyDirection(row, KiwoomParser.Number(row, "compareToPreviousClosePrice"));
-                            if (previousClose > 0)
-                            {
-                                var extendedPercent = (extendedPrice / previousClose - 1) * 100;
-                                price = extendedPrice; percent = extendedPercent;
-                                sourceTime = extendedTime; marketStatus = KiwoomParser.Text(extended, "overMarketStatus");
-                                source += session == "PRE_MARKET" ? " · 프리마켓" : " · 애프터마켓";
-                            }
+                            // US after-hours ratios use today's close; keep the app's
+                            // previous-day basis. Premarket uses the last regular close.
+                            var previousClose = tradingSession == "PRE_MARKET" ? regularPrice
+                                : regularPrice - ApplyDirection(row, KiwoomParser.Number(row, "compareToPreviousClosePrice"));
+                            if (previousClose <= 0) continue;
+                            extendedPercent = (extendedPrice / previousClose - 1) * 100;
                         }
+                        else extendedPercent = ApplyDirection(extended, KiwoomParser.Number(extended, "fluctuationsRatio"));
+                        price = extendedPrice; percent = extendedPercent; sourceTime = extendedTime;
+                        var sessionName = tradingSession switch
+                        { "PRE_MARKET" => "프리마켓", "AFTER_MARKET" => "애프터마켓", _ => "메인마켓" };
+                        source = unitedStates ? source + " · " + sessionName : "네이버 공개 시세 · NXT · " + sessionName;
                     }
                     catch (Exception ex) when (ex is InvalidDataException or OverflowException) { /* Preserve valid regular data. */ }
                 }
+                marketStatus = openSession ? "OPEN" : closedSession ? "CLOSE" : marketStatus;
                 result.Add(new(code, price, percent, DateTimeOffset.UtcNow, sourceTime?.ToOffset(TimeSpan.FromHours(9)).ToString("HHmmss"),
                     Source: source, SourceTime: sourceTime, MarketStatus: marketStatus, Currency: currency));
             }
@@ -198,31 +222,68 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         foreach (var batch in due.Chunk(20))
         {
             var startedAt = DateTimeOffset.UtcNow;
+            var quotes = new Dictionary<string, Quote>();
+            Exception? primaryError = null;
             try
             {
                 var path = market.UnitedStates ? "worldstock" : "domestic";
                 var providerCodes = batch.Select(c => Uri.EscapeDataString(StockCode.ProviderCode(c)));
                 var root = await GetJsonAsync($"https://polling.finance.naver.com/api/realtime/{path}/stock/" + string.Join(',', providerCodes), cancellation).ConfigureAwait(false);
                 Interlocked.Exchange(ref providerIntervalTicks, ReadPollingInterval(root).Ticks);
-                var quotes = ParseQuotes(root, market.UnitedStates).Where(q => batch.Contains(q.Code)).ToArray();
-                // Schedule from request start rather than adding another second after network latency.
-                var next = startedAt + DefaultInterval;
-                var earliest = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(50);
-                if (next < earliest) next = earliest;
-                foreach (var quote in quotes)
-                {
-                    market.Cache[quote.Code] = quote; market.NextFetch[quote.Code] = next;
-                    market.Errors.Remove(quote.Code); market.Failures.Remove(quote.Code);
-                    if (Volatile.Read(ref market.Subscriptions).Contains(quote.Code)) QuoteReceived?.Invoke(quote);
-                    Report(market, quote.Code, new("공개 시세 연결 · 1초 목표", true, Code: quote.Code));
-                }
-                foreach (var code in batch.Except(quotes.Select(q => q.Code)))
-                    Failed(market, code, new InvalidDataException("해당 종목의 공개 시세가 제공되지 않습니다."));
+                foreach (var quote in ParseQuotes(root, market.UnitedStates).Where(q => batch.Contains(q.Code))) quotes[quote.Code] = quote;
+                if (market.UnitedStates && root.TryGetProperty("datas", out var rows))
+                    foreach (var row in rows.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object))
+                    {
+                        var code = "US:" + KiwoomParser.Text(row, "reutersCode");
+                        if (batch.Contains(code)) dayMarket?.Register(new(code, KiwoomParser.Text(row, "stockName"), "USA", KiwoomParser.Text(row, "symbolCode")));
+                    }
             }
             catch (Exception ex) when (!cancellation.IsCancellationRequested
-                && (ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException))
+                && ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
+            { primaryError = ex; }
+            DayMarketBatch? daytime = null;
+            var dayFailed = false;
+            if (market.UnitedStates && dayMarket is not null)
             {
-                foreach (var code in batch) Failed(market, code, ex);
+                try { daytime = await dayMarket.GetQuotesAsync(batch, cancellation).ConfigureAwait(false); }
+                catch (Exception ex) when (!cancellation.IsCancellationRequested
+                    && ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
+                { dayFailed = true; }
+            }
+            var next = startedAt + DefaultInterval;
+            var earliest = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(50);
+            if (next < earliest) next = earliest;
+            foreach (var code in batch)
+            {
+                quotes.TryGetValue(code, out var quote);
+                if (daytime is not null)
+                {
+                    if (daytime.Quotes.TryGetValue(code, out var dayQuote)
+                        && (quote?.SourceTime is null || dayQuote.SourceTime >= quote.SourceTime)) quote = dayQuote;
+                    if (daytime.OpenCodes.Contains(code))
+                    {
+                        if (quote is null && market.Cache.TryGetValue(code, out var cached)) quote = cached with { ReceivedAt = DateTimeOffset.UtcNow };
+                        if (quote is not null) quote = quote with { MarketStatus = "OPEN" };
+                    }
+                }
+                if (quote is null)
+                {
+                    Failed(market, code, primaryError ?? new InvalidDataException("해당 종목의 공개 시세가 제공되지 않습니다."));
+                    continue;
+                }
+                var uncertain = (dayFailed || daytime?.UnknownCodes.Contains(code) == true) && quote.MarketStatus != "OPEN";
+                if (uncertain) quote = quote with { MarketStatus = "UNKNOWN" };
+                // Keep the last daytime trade after its session ends, until another
+                // venue supplies a newer trade. Session status can still change.
+                if (market.Cache.TryGetValue(code, out var previous) && previous.SourceTime is { } previousTime
+                    && quote.SourceTime is { } currentTime && currentTime < previousTime)
+                    quote = previous with { ReceivedAt = quote.ReceivedAt, MarketStatus = quote.MarketStatus };
+                market.Cache[code] = quote; market.NextFetch[code] = next;
+                market.Errors.Remove(code); market.Failures.Remove(code);
+                if (Volatile.Read(ref market.Subscriptions).Contains(code)) QuoteReceived?.Invoke(quote);
+                Report(market, code, uncertain
+                    ? new("데이마켓 확인 지연 · 마지막 가격 유지 · 재시도 중", Code: code)
+                    : new("공개 시세 연결 · 1초 목표", true, Code: code));
             }
         }
     }
@@ -304,7 +365,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         Task[] runners;
         lock (lifecycleGate) runners = new[] { domestic.Runner, unitedStates.Runner }.OfType<Task>().ToArray();
         await Task.WhenAll(runners).ConfigureAwait(false);
-        http.Dispose(); lifetime.Dispose();
+        http.Dispose(); dayMarket?.Dispose(); lifetime.Dispose();
     }
     private sealed class MarketState(bool unitedStates)
     {

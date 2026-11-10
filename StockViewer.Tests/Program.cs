@@ -36,8 +36,8 @@ internal static partial class Program
                 else
                 {
                     SettingsMigrationTests();
-                    if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); await UnitedStatesDataTests(); await FastPollingTests(); }
-                    await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
+                    if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await FastPollingTests(); }
+                    await LoadingPopupTests(); await PlacementTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
                     if (!native) await PointerPipelineTests();
                     if (native) await NativeWindowChecks();
                 }
@@ -97,6 +97,40 @@ internal static partial class Program
         popup.ProcessMouseDown(first, 2); popup.ProcessMouseDown(first == MouseButton.Left ? MouseButton.Right : MouseButton.Left, 2);
         popup.ProcessMouseUp(firstRelease); popup.ProcessMouseUp(firstRelease == MouseButton.Left ? MouseButton.Right : MouseButton.Left);
     }
+    private static async Task LoadingPopupTests()
+    {
+        var apple = new Stock("US:AAPL.O", "애플", "NASDAQ", "AAPL");
+        var main = MakeMain(); var slow = new DelayedQuoteService { SearchResults = [apple] };
+        await main.UseServiceAsync(slow, DemoMarketData.SampleStocks); await Idle();
+        main.Activate();
+        var box = Find<TextBox>(main, "SearchBox"); box.Focus(); box.Text = "apple";
+        try
+        {
+            var results = Find<ListBox>(main, "SearchResults");
+            await Until(() => results.ItemCount == 1);
+            Check((results.SelectedItem as Stock)?.Code == apple.Code,
+                "English company search selects Apple from remote autocomplete");
+            Find<Button>(main, "SearchButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(() => slow.SnapshotRequested); await Idle();
+            var popup = main.Popups[apple.Code];
+            Check(popup.IsVisible && popup.Bounds.Width > 0 && popup.Bounds.Height == 32
+                && popup.ClientSize.Width > 0 && popup.ClientSize.Height == 32,
+                "Apple popup has a visible native client area while its first quote is pending");
+            Check(Math.Abs(popup.Position.X + popup.ClientSize.Width * popup.RenderScaling / 2
+                - main.Position.X - main.ClientSize.Width * main.RenderScaling / 2) <= popup.RenderScaling,
+                "the loading Apple popup is centered beneath search before its quote arrives");
+            slow.Snapshot.TrySetResult(new(apple.Code, 350.88m, 2.48m, DateTimeOffset.UtcNow, Currency: "USD"));
+            await Until(() => popup.LastQuote is not null); await Idle();
+            Check(popup.DisplayedPrice == "$350.88" && popup.ClientSize.Width > 0 && popup.ClientSize.Height == 32,
+                "a delayed Apple quote fills the existing visible popup without collapsing it");
+        }
+        finally
+        {
+            slow.Snapshot.TrySetCanceled();
+            foreach (var popup in main.Popups.Values.ToArray()) popup.Close();
+            main.Close();
+        }
+    }
     private static async Task UiTests()
     {
         var main = MakeMain(); await Idle();
@@ -104,7 +138,7 @@ internal static partial class Program
         Check(main.Bounds.Size == new Size(286, 80), "search window matches the WPF 286 x 80 DIP size");
         SaveImage(main, "search-empty.png");
         var buttons = main.GetVisualDescendants().OfType<Button>().Where(x => x.IsEffectivelyVisible && x is not CheckBox).ToArray();
-        Check(buttons.Length == 3 && buttons.All(b => b.Name is "CloseButton" or "MinimizeButton" or "SearchButton"), "only minimize, X and search buttons are visible");
+        Check(buttons.Length == 4 && buttons.All(b => b.Name is "ThemeButton" or "CloseButton" or "MinimizeButton" or "SearchButton"), "theme, minimize, X and search buttons are visible");
         var display = Find<CheckBox>(main, "DisplayName"); var close = Find<Button>(main, "CloseButton");
         Check(Math.Abs(display.TranslatePoint(new Point(0, display.Bounds.Height / 2), main)!.Value.Y
             - close.TranslatePoint(new Point(0, close.Bounds.Height / 2), main)!.Value.Y) < 2, "name checkbox and X share one horizontal row");

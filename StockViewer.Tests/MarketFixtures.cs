@@ -3,8 +3,9 @@ using StockViewer.Core;
 namespace StockViewer.Tests;
 internal static partial class Program
 {
-    private sealed class DelayedQuoteService : IMarketDataService
+    private sealed class DelayedQuoteService : IMarketDataService, IStockSearchService
     {
+        public IReadOnlyList<Stock> SearchResults { get; init; } = [];
         public bool IsDemo => true;
         public bool Disposed { get; private set; }
         public bool SnapshotRequested { get; private set; }
@@ -19,6 +20,8 @@ internal static partial class Program
         public Task<Quote> GetSnapshotAsync(string code, CancellationToken cancellation = default)
         { SnapshotRequested = true; SnapshotCancellation = cancellation; return Snapshot.Task.WaitAsync(cancellation); }
         public Task SetSubscriptionsAsync(IEnumerable<string> codes, CancellationToken cancellation = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Stock>> SearchAsync(string query, CancellationToken cancellation = default)
+            => Task.FromResult(SearchResults);
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }
     private sealed class DelayedSearchService : IMarketDataService, IStockSearchService

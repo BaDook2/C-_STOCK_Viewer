@@ -32,6 +32,12 @@ public sealed class SettingsStore
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; }
     }
     public void SaveDisplayName(bool enabled) => AtomicWrite("display-name.txt", Encoding.UTF8.GetBytes(enabled ? "true" : "false"));
+    public bool LoadDarkMode()
+    {
+        try { return File.ReadAllText(Path.Combine(directory, "theme.txt")) == "dark"; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+    public void SaveDarkMode(bool enabled) => AtomicWrite("theme.txt", Encoding.UTF8.GetBytes(enabled ? "dark" : "light"));
     public IReadOnlyList<Stock> LoadCatalog()
     {
         try { return JsonSerializer.Deserialize<Stock[]>(File.ReadAllText(Path.Combine(directory, "stocks.json"))) ?? []; }
