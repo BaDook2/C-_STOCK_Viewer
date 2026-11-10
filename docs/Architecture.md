@@ -17,3 +17,7 @@ Position은 화면 픽셀, 크기는 DIP입니다. 모니터 배율로 변환한
 설정은 `%LOCALAPPDATA%\StockViewer`를 사용합니다. 별도 시험판의 `%LOCALAPPDATA%\StockViewer_avalonia`에 있는 display-name.txt·stocks.json은 새 경로에 해당 파일이 없을 때만 이전합니다. 기존 설정을 덮거나 키 파일을 읽지 않습니다.
 
 Core의 WPF 시절 기준 소스와 체크섬은 [이전 코어 기록](core-source-manifest.json)에 남기고, 그 시점의 WPF 파일 보존 확인은 docs/history에 기록합니다. 현재 빌드는 외부의 WPF 폴더를 참조하지 않습니다.
+
+가격창 배치는 popup-layout.json에 버전·종목·물리 픽셀 좌표·고정 상태·종목명 표시 여부를 원자적으로 저장합니다. 불러오기 시 JSON과 종목 코드를 검증하며, 새로운 창은 첫 유효 시세 수신 후 표시합니다. 기존 창은 재사용하고 전체 복원 성공 시에만 저장 목록 밖의 창을 닫습니다. 모니터 작업 영역 밖의 위치는 현재 화면에 맞춰 제한합니다.
+
+PopupTopmost는 모든 고정 창의 실제 HWND WS_EX_TOPMOST 또는 NSWindow level을 확인합니다. 활성화 변경과 1초 간격 점검에서 누락된 창만 비활성 상태로 복구하므로 정상 창을 반복해서 앞으로 올리지 않습니다. Windows의 고정 창 WndProc도 z-order 강등을 차단합니다. 창이 닫히거나 고정 해제되면 등록을 해제하고 마지막 고정 창이 사라지면 타이머를 중지합니다. 다른 창에서 넘어온 우클릭 횟수로 첫 우클릭을 더블클릭 닫기로 오인하지 않도록 창별 클릭 완료 상태를 확인합니다.

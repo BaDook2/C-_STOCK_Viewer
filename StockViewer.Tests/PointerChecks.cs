@@ -77,7 +77,7 @@ internal static partial class Program
             {
                 Application.Current!.RequestedThemeVariant = dark ? Avalonia.Styling.ThemeVariant.Dark : Avalonia.Styling.ThemeVariant.Light;
                 await Idle();
-                foreach (var name in new[] { "SearchButton", "ThemeButton", "MinimizeButton", "CloseButton", "DisplayName", "SearchBox" })
+                foreach (var name in new[] { "SearchButton", "SaveLayoutButton", "LoadLayoutButton", "ThemeButton", "MinimizeButton", "CloseButton", "DisplayName", "SearchBox" })
                 {
                     main.MouseMove(new Point(-10, -10)); await Idle();
                     var control = Find<Control>(main, name);

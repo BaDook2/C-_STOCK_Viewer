@@ -16,9 +16,10 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, QuoteWindow> popups = [];
     private readonly Dictionary<string, PendingOpen> pendingOpens = [];
     private DataDelayWindow? dataDelayNotice;
-    private sealed class PendingOpen(bool showName, CancellationToken token) : IDisposable
+    private sealed class PendingOpen(bool showName, CancellationToken token, PopupState? placement = null) : IDisposable
     {
         public bool ShowName { get; } = showName;
+        public PopupState? Placement { get; } = placement;
         public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(token);
         public TaskCompletionSource<Quote> Quote { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<QuoteWindow?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -93,6 +94,7 @@ public partial class MainWindow : Window
         closing = true; lifetime.Cancel(); session.Cancel();
         CancelPendingOpens();
         dataDelayNotice?.Close();
+        layoutNotice?.Close();
         foreach (var popup in popups.Values.ToArray()) popup.Close();
         try { if (service is not null) await service.DisposeAsync(); }
         finally
@@ -184,13 +186,15 @@ public partial class MainWindow : Window
         catch (Exception e) when (IsDataError(e))
         { if (ReferenceEquals(service, current)) ShowStatus(new("구독 변경 실패 · 재연결 대기")); }
     }
-    public Task<QuoteWindow?> OpenStockAsync(Stock stock)
+    public Task<QuoteWindow?> OpenStockAsync(Stock stock) => restoringLayout
+        ? Task.FromResult<QuoteWindow?>(null) : OpenStockAtAsync(stock, null);
+    private Task<QuoteWindow?> OpenStockAtAsync(Stock stock, PopupState? placement)
     {
         if (closing || searchHidden) return Task.FromResult<QuoteWindow?>(null);
         if (pendingOpens.TryGetValue(stock.Code, out var pending)) return pending.Completion.Task;
         if (!popups.ContainsKey(stock.Code) && popups.Keys.Concat(pendingOpens.Keys).Distinct().Count() >= 200)
         { ShowStatus(new("동시에 최대 200개 종목까지 표시할 수 있어요.", connection.Connected, connection.IsDemo)); return Task.FromResult<QuoteWindow?>(null); }
-        var request = new PendingOpen(DisplayName.IsChecked == true, session.Token);
+        var request = new PendingOpen(placement?.ShowName ?? DisplayName.IsChecked == true, session.Token, placement);
         pendingOpens.Add(stock.Code, request); DismissSuggestions();
         _ = CompleteOpenAsync(stock, request, service);
         return request.Completion.Task;
@@ -212,7 +216,7 @@ public partial class MainWindow : Window
             if (closing || searchHidden || request.Cancellation.IsCancellationRequested || !ReferenceEquals(service, client)
                 || !pendingOpens.TryGetValue(stock.Code, out var current) || !ReferenceEquals(current, request))
             { request.Completion.TrySetResult(null); return; }
-            var popup = CreateQuoteWindow(stock, request.ShowName, quote, request.Status ?? connection);
+            var popup = CreateQuoteWindow(stock, request.ShowName, quote, request.Status ?? connection, request.Placement);
             request.Completion.TrySetResult(popup);
         }
         catch (TimeoutException)
@@ -249,7 +253,7 @@ public partial class MainWindow : Window
         }
         catch (Exception e) when (IsDataError(e)) { /* The live subscription can still supply the first quote before the deadline. */ }
     }
-    private QuoteWindow CreateQuoteWindow(Stock stock, bool showName, Quote quote, ConnectionStatus status)
+    private QuoteWindow CreateQuoteWindow(Stock stock, bool showName, Quote quote, ConnectionStatus status, PopupState? placement)
     {
         if (popups.Remove(stock.Code, out var old)) old.Close();
         var popup = new QuoteWindow(stock, showName);
@@ -265,7 +269,11 @@ public partial class MainWindow : Window
         popup.SetConnection(status); popup.ApplyQuote(quote);
         // Showing first initializes the native size. Measuring an unopened macOS
         // window can otherwise leave its client area at 0x0 until it is closed.
-        popup.Show(); PopupPlacement.BelowSearch(popup, this, popups.Values); DismissSuggestions();
+        if (placement is not null) popup.Position = new(placement.X, placement.Y);
+        popup.Show();
+        if (placement is null) PopupPlacement.BelowSearch(popup, this, popups.Values);
+        else RestorePopup(popup, placement);
+        PopupTopmost.QueueCheck(); DismissSuggestions();
         return popup;
     }
     private async Task LoadQuoteAsync(QuoteWindow popup, IMarketDataService client, CancellationToken cancellation)
@@ -396,6 +404,6 @@ public partial class MainWindow : Window
         if (searchHidden) return;
         if (popups.Count == 0) { Close(); return; }
         searchVisibilityVersion++; searchHidden = true;
-        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); Hide();
+        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); layoutNotice?.Close(); Hide();
     }
 }

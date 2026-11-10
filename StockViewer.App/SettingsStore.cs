@@ -44,6 +44,22 @@ public sealed class SettingsStore
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return []; }
     }
     public void SaveCatalog(IReadOnlyList<Stock> stocks) => AtomicWrite("stocks.json", JsonSerializer.SerializeToUtf8Bytes(stocks));
+    public PopupLayout? LoadPopupLayout()
+    {
+        try
+        {
+            var path = Path.Combine(directory, "popup-layout.json");
+            if (new FileInfo(path).Length > 512_000) return null;
+            var layout = JsonSerializer.Deserialize<PopupLayout>(File.ReadAllText(path));
+            return layout is { IsValid: true } ? layout : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { return null; }
+    }
+    public void SavePopupLayout(PopupLayout layout)
+    {
+        if (!layout.IsValid) throw new ArgumentException("저장할 가격창 배치를 확인해 주세요.", nameof(layout));
+        AtomicWrite("popup-layout.json", JsonSerializer.SerializeToUtf8Bytes(layout));
+    }
     private void AtomicWrite(string filename, byte[] bytes)
     {
         Directory.CreateDirectory(directory);

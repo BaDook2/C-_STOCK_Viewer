@@ -1,0 +1,14 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StockViewer.Desktop.LayoutNoticeWindow" Title="가격창 배치 · StockViewer"
+        Width="320" SizeToContent="Height" CanResize="False" CanMinimize="False" CanMaximize="False"
+        WindowDecorations="None" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Topmost="True"
+        TransparencyLevelHint="Transparent" Background="Transparent" KeyDown="NoticeKeyDown">
+  <Border Margin="4" Padding="18" CornerRadius="12" Background="{DynamicResource SurfaceBrush}"
+          BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+    <StackPanel Spacing="12">
+      <TextBlock Text="가격창 배치" FontSize="15" FontWeight="SemiBold" />
+      <TextBlock Name="Message" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" />
+      <Button Content="확인" HorizontalAlignment="Right" MinWidth="66" Click="Dismiss" />
+    </StackPanel>
+  </Border>
+</Window>

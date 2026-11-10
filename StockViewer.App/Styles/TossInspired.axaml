@@ -72,7 +72,7 @@
   <Style Selector="Button:disabled"><Setter Property="Opacity" Value="0.45" /><Setter Property="Cursor" Value="Arrow" /></Style>
   <Style Selector="Button.icon">
     <Setter Property="Background" Value="Transparent" /><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-    <Setter Property="Width" Value="24" /><Setter Property="Height" Value="22" /><Setter Property="Padding" Value="0" />
+    <Setter Property="Width" Value="22" /><Setter Property="Height" Value="22" /><Setter Property="Padding" Value="0" />
   </Style>
   <Style Selector="Button.icon:pointerover /template/ Border#Box">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />

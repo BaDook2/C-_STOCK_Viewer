@@ -22,6 +22,7 @@ public partial class QuoteWindow : Window
     public event EventHandler? SearchRequested;
     private bool leftButtonDown, rightButtonDown, closeOnRelease, closeQueued, closed;
     private bool searchPending, searchDispatchQueued, resetRightClickCount, leftDragging;
+    private bool rightClickCompleted;
     private PixelPoint dragStartScreen, dragStartWindow, fixedPosition;
     private DateTimeOffset? latestSourceTime, lastResponseAt;
     private IPointer? capturedPointer;
@@ -42,28 +43,33 @@ public partial class QuoteWindow : Window
             if (!leftButtonDown && !rightButtonDown && searchDispatchQueued)
             { capturedPointer = null; return; } // Avalonia releases implicit capture after the final up.
             if (leftButtonDown || rightButtonDown || searchPending) resetRightClickCount = true;
+            if (leftButtonDown || rightButtonDown || searchPending) rightClickCompleted = false;
             leftButtonDown = rightButtonDown = searchPending = closeOnRelease = leftDragging = false;
             capturedPointer = null;
         };
         Opened += (_, _) =>
         {
+            PopupTopmost.Update(this);
             if (!OperatingSystem.IsWindows()) return;
             Win32Properties.AddWndProcHookCallback(this, WindowMessage);
             if (TryGetPlatformHandle() is { HandleDescriptor: "HWND" } handle && handle.Handle != IntPtr.Zero)
                 SetWindowPos(handle.Handle, IntPtr.Zero, 0, 0, (int)Math.Round(Bounds.Width * RenderScaling),
                     (int)Math.Round(32 * RenderScaling), 0x0002 | 0x0004 | 0x0010);
         };
+        Activated += (_, _) => PopupTopmost.QueueCheck();
+        Deactivated += (_, _) => PopupTopmost.QueueCheck();
         PositionChanged += (_, _) => { if (IsFixed && Position != fixedPosition) Position = fixedPosition; };
         Closed += (_, _) =>
         {
             closed = true; ReleaseCapture();
+            PopupTopmost.Remove(this);
             if (OperatingSystem.IsWindows()) Win32Properties.RemoveWndProcHookCallback(this, WindowMessage);
         };
     }
     public void SetNameVisible(bool visible)
     { StockName.IsVisible = visible; Title = visible ? Stock.Name + " · StockViewer" : "StockViewer"; }
     public void SetFixed(bool enabled)
-    { fixedPosition = Position; IsFixed = enabled; Topmost = enabled; SetStatus(StatusMessage); }
+    { fixedPosition = Position; IsFixed = enabled; Topmost = enabled; PopupTopmost.Update(this); SetStatus(StatusMessage); }
     private IBrush ResourceBrush(string key) => (IBrush)this.FindResource(ActualThemeVariant, key)!;
     private void RefreshQuoteColors()
     {
@@ -99,7 +105,7 @@ public partial class QuoteWindow : Window
     }
     public void SetConnection(ConnectionStatus connection)
     { if (connection.Code is not null && connection.Code != Stock.Code) return; status = connection; RefreshStatus(); }
-    public void ShowError(string message) { SetStatus(message); Card.Opacity = LastQuote is null ? 1 : .55; }
+    public void ShowError(string message) => SetStatus(message);
     public void ResetQuote()
     {
         LastQuote = null; latestSourceTime = lastResponseAt = null; PriceText.Text = PercentText.Text = "—";
@@ -108,12 +114,13 @@ public partial class QuoteWindow : Window
     private void SetStatus(string message)
     {
         StatusMessage = message;
+        Avalonia.Automation.AutomationProperties.SetHelpText(this,
+            IsFixed ? "맨 위 고정 · 위치 고정" : "고정 해제 · 드래그로 이동");
         ToolTip.SetTip(Card, message + $"\n{(IsFixed ? "Fix" : "Free")} · 우클릭: 고정 전환 · 우클릭 두 번: 닫기\n좌우 버튼 동시 클릭: 근처에 검색창 표시");
     }
     private void RefreshStatus()
     {
         RefreshQuoteColors();
-        Card.Opacity = status.Connected || LastQuote is null ? 1 : .55;
         if (LastQuote is { IsDemo: true }) { SetStatus("DEMO · 예시 가격 · 실제 시세 아님"); return; }
         if (!status.Connected)
         {
@@ -137,17 +144,18 @@ public partial class QuoteWindow : Window
         {
             leftButtonDown = true; rightButtonDown |= otherButtonPressed;
             dragStartScreen = screenPosition ?? Position; dragStartWindow = Position; leftDragging = false; resetRightClickCount = true;
+            rightClickCompleted = false;
         }
         else
         {
             rightButtonDown = true; leftButtonDown |= otherButtonPressed;
-            closeOnRelease = !resetRightClickCount && clickCount >= 2; resetRightClickCount = false;
+            closeOnRelease = rightClickCompleted && !resetRightClickCount && clickCount >= 2; resetRightClickCount = false;
         }
         if (leftButtonDown && rightButtonDown || searchPending) BeginSearchGesture();
         capturedPointer?.Capture(this);
     }
     private void BeginSearchGesture()
-    { searchPending = true; closeOnRelease = false; resetRightClickCount = true; leftDragging = false; }
+    { searchPending = true; closeOnRelease = false; resetRightClickCount = true; rightClickCompleted = false; leftDragging = false; }
     public void ProcessMouseUp(MouseButton button)
     {
         if (closed || button is not (MouseButton.Left or MouseButton.Right)) return;
@@ -161,7 +169,7 @@ public partial class QuoteWindow : Window
             closeOnRelease = false; closeQueued = true;
             Dispatcher.UIThread.Post(() => { if (!closed) { ReleaseCapture(); Close(); } }, DispatcherPriority.Background); return;
         }
-        if (button == MouseButton.Right && wasDown) SetFixed(!IsFixed);
+        if (button == MouseButton.Right && wasDown) { rightClickCompleted = true; SetFixed(!IsFixed); }
         if (!leftButtonDown && !rightButtonDown) ReleaseCapture();
     }
     private void ReleaseCapture()
@@ -228,7 +236,13 @@ public partial class QuoteWindow : Window
         if (msg == 0x0046 && lParam != IntPtr.Zero)
         {
             var position = Marshal.PtrToStructure<WindowPosition>(lParam);
-            if (IsFixed) position.Flags |= 0x0002;
+            if (IsFixed)
+            {
+                position.Flags |= 0x0002;
+                // Activation, resizing and other native ordering requests must
+                // never demote one pinned quote while another stays topmost.
+                if ((position.Flags & 0x0004) == 0) position.InsertAfter = new(-1);
+            }
             if ((position.Flags & 0x0001) == 0) position.Height = (int)Math.Round(32 * RenderScaling);
             Marshal.StructureToPtr(position, lParam, false); handled = true;
         }

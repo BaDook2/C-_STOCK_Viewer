@@ -37,7 +37,7 @@ internal static partial class Program
                 {
                     SettingsMigrationTests();
                     if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await FastPollingTests(); }
-                    await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
+                    await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await PopupLayoutTests(); await MultipleTopmostTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
                     if (!native) await PointerPipelineTests();
                     if (native) await NativeWindowChecks();
                 }
@@ -105,7 +105,10 @@ internal static partial class Program
         Check(main.Bounds.Size == new Size(286, 80), "search window matches the WPF 286 x 80 DIP size");
         SaveImage(main, "search-empty.png");
         var buttons = main.GetVisualDescendants().OfType<Button>().Where(x => x.IsEffectivelyVisible && x is not CheckBox).ToArray();
-        Check(buttons.Length == 4 && buttons.All(b => b.Name is "ThemeButton" or "CloseButton" or "MinimizeButton" or "SearchButton"), "theme, minimize, X and search buttons are visible");
+        Check(buttons.Length == 6 && buttons.All(b => b.Name is "SaveLayoutButton" or "LoadLayoutButton" or "ThemeButton" or "CloseButton" or "MinimizeButton" or "SearchButton"), "save, load, theme, minimize, X and search buttons are visible");
+        Check(Find<Button>(main, "SaveLayoutButton").Bounds.Width == 22
+            && Find<CheckBox>(main, "DisplayName").Bounds.Right <= Find<Button>(main, "SaveLayoutButton").TranslatePoint(default, main)!.Value.X,
+            "the compact toolbar leaves room for the full display-name checkbox");
         var display = Find<CheckBox>(main, "DisplayName"); var close = Find<Button>(main, "CloseButton");
         Check(Math.Abs(display.TranslatePoint(new Point(0, display.Bounds.Height / 2), main)!.Value.Y
             - close.TranslatePoint(new Point(0, close.Bounds.Height / 2), main)!.Value.Y) < 2, "name checkbox and X share one horizontal row");
@@ -140,7 +143,7 @@ internal static partial class Program
         replacement.SetConnection(new("other failure", Code: "000660"));
         Check(Find<Border>(replacement, "Card").Opacity == 1, "another symbol's error does not dim this popup");
         replacement.SetConnection(new("reconnecting", Code: "005930"));
-        Check(Find<Border>(replacement, "Card").Opacity < 1, "failed symbol retains and dims its last price");
+        Check(Find<Border>(replacement, "Card").Opacity == 1, "failed symbol retains its last price and fully opaque background");
         var us = new QuoteWindow(new("US:AAPL.O", "애플", "NASDAQ", "AAPL"), true);
         us.Show(); us.SetConnection(new("connected", true));
         us.ApplyQuote(new("US:AAPL.O", 1234.50m, 1.25m, now, Currency: "USD")); await Idle();

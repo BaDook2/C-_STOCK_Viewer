@@ -5,8 +5,21 @@ namespace StockViewer.Desktop;
 
 public static class PopupPlacement
 {
+    public static PixelPoint ClampToWorkArea(PixelPoint position, PixelSize size, PixelRect area) => new(
+        Math.Clamp(position.X, area.X, Math.Max(area.X, area.Right - size.Width)),
+        Math.Clamp(position.Y, area.Y, Math.Max(area.Y, area.Bottom - size.Height)));
     public static void BelowSearch(Window popup, Window search, IEnumerable<Window>? occupied = null) => BelowAnchor(popup, search, occupied);
     public static void BelowQuote(Window search, Window quote) => BelowAnchor(search, quote);
+    public static void AvoidQuotes(Window search, IEnumerable<Window> quotes)
+    {
+        search.Measure(Size.Infinity);
+        var screen = search.Screens.ScreenFromWindow(search) ?? search.Screens.Primary;
+        if (screen is null) return;
+        var size = PixelSize.FromSize(PlacementSize(search), screen.Scaling);
+        var occupied = quotes.Where(q => q.IsVisible).Select(q =>
+            new PixelRect(q.Position, PixelSize.FromSize(PlacementSize(q), q.RenderScaling)));
+        search.Position = FindFreePosition(search.Position, size, screen.WorkingArea, occupied, screen.Scaling);
+    }
     public static PixelPoint BelowAnchor(PixelRect anchor, PixelSize popup, PixelRect workArea, double scaling = 1)
     {
         var gap = (int)Math.Round(4 * scaling);
