@@ -70,3 +70,6 @@
 - 선택 테두리와 hover는 옅은 테두리 리소스만 변경하며, 라이트·다크 양쪽에서 글자색·배경·불투명도를 유지함을 검사함. 기존 좌우 버튼 동시 클릭과 단일 창 더블 우클릭 종료 검사를 유지함.
 - Release 빌드 경고 0/오류 0. 전체 헤드리스 회귀 410개, Mac 실제 창 검사 214개 통과. 기존 20개 저장 배치는 직접 조작 검사 후 원본으로 복원함.
 - 게시 기능이 없는 verify workflow를 Windows·Apple Silicon·Intel Mac으로 확장하고 Mac 패키지에 포함된 바탕화면 관찰 모듈의 아키텍처·서명·독립 시작을 검사함. 릴리즈 workflow는 실행하지 않음.
+
+- 게시 없는 [Windows·Mac 검증](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42770768089) 모두 성공. Windows 헤드리스 410개·실제 창 222개, Apple Silicon 및 Intel Mac 헤드리스 각 410개·실제 창 각 214개 통과. 두 Mac 패키지의 관찰 모듈 아키텍처·번들 서명·압축 해제 후 독립 실행도 통과함.
+- 로컬 StockViewer-macOS.app을 최종 수정본으로 교체하고 기존 20개 배치를 불러오는 화면을 확인함. 임시 앱 3개와 교체 전 앱은 휴지통으로 옮겼고 프로젝트 안의 StockViewer .app은 현재 앱 하나만 남김. 이전 정식 v2.1.1·v2.1.0 ZIP은 유지함. 새 릴리즈는 게시하지 않음.
