@@ -61,6 +61,16 @@ internal static partial class Program
         {
             var first = (await main.OpenStockAsync(DemoMarketData.SampleStocks[0]))!;
             var second = (await main.OpenStockAsync(DemoMarketData.SampleStocks[1]))!; first.SetFixed(true);
+            var missingEntries = 0;
+            void ObserveTaskbar(object? sender, AvaloniaPropertyChangedEventArgs e)
+            {
+                if ((e.Property == Window.IsVisibleProperty || e.Property == Window.ShowInTaskbarProperty)
+                    && !(main.IsVisible && main.ShowInTaskbar)
+                    && !main.Popups.Values.Any(p => p.IsVisible && p.ShowInTaskbar)) missingEntries++;
+            }
+            main.PropertyChanged += ObserveTaskbar;
+            first.PropertyChanged += ObserveTaskbar;
+            second.PropertyChanged += ObserveTaskbar;
             Check(main.Popups.Values.All(p => !p.ShowInTaskbar), "visible search is the only taskbar entry");
             HideSearch(main); await Idle();
             Check(!main.IsVisible && main.TaskbarPopup == first && first.ShowInTaskbar && !second.ShowInTaskbar && first.IsFixed,
@@ -71,6 +81,11 @@ internal static partial class Program
             HideSearch(main); first.Close(); await Idle();
             Check(main.TaskbarPopup == second && second.ShowInTaskbar && !main.IsVisible,
                 "closing the representative price transfers the taskbar entry to another open quote");
+            Check(missingEntries == 0,
+                "hide, restore and representative close never leave the application without a visible taskbar entry");
+            main.PropertyChanged -= ObserveTaskbar;
+            first.PropertyChanged -= ObserveTaskbar;
+            second.PropertyChanged -= ObserveTaskbar;
         }
         finally { main.Close(); }
     }

@@ -113,11 +113,11 @@ public partial class MainWindow : Window
         if (closing || windowClosed || sender is not QuoteWindow popup || !popup.IsVisible
             || !popups.TryGetValue(popup.Stock.Code, out var current) || !ReferenceEquals(current, popup)) return;
         searchHidden = false; DismissSuggestions();
-        RefreshTaskbarPopup();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         WindowStartupLocation = WindowStartupLocation.Manual;
         PopupPlacement.BelowQuote(this, popup);
         if (!IsVisible) Show();
+        RefreshTaskbarPopup();
         PopupPlacement.BelowQuote(this, popup);
         Activate(); SearchBox.Focus();
     }
@@ -263,11 +263,13 @@ public partial class MainWindow : Window
         if (popups.Remove(stock.Code, out var old)) old.Close();
         var popup = new QuoteWindow(stock, showName, selection);
         popup.NativeAppCloseRequested += CloseFromTaskbar;
+        popup.Closing += PopupLeavingTaskbar;
         popups[stock.Code] = popup; popup.SearchRequested += ShowSearchNearQuote;
         popup.Closed += async (_, _) =>
         {
             popup.SearchRequested -= ShowSearchNearQuote;
             popup.NativeAppCloseRequested -= CloseFromTaskbar;
+            popup.Closing -= PopupLeavingTaskbar;
             if (!popups.TryGetValue(stock.Code, out var current) || !ReferenceEquals(current, popup)) return;
             popups.Remove(stock.Code);
             RefreshTaskbarPopup();
@@ -412,7 +414,8 @@ public partial class MainWindow : Window
         if (searchHidden) return;
         if (popups.Count == 0) { Close(); return; }
         searchVisibilityVersion++; searchHidden = true;
-        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); StopLayoutFeedback(); Hide();
+        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); StopLayoutFeedback();
         RefreshTaskbarPopup();
+        Hide();
     }
 }

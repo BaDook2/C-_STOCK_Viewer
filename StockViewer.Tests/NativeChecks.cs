@@ -42,14 +42,32 @@ internal static partial class Program
         var freePrice = (await hidden.OpenStockAsync(DemoMarketData.SampleStocks[1]))!; fixedPrice.SetFixed(true);
         var hiddenHandle = hidden.TryGetPlatformHandle()!.Handle;
         var fixedHandle = fixedPrice.TryGetPlatformHandle()!.Handle; var freeHandle = freePrice.TryGetPlatformHandle()!.Handle;
+        var taskbarGaps = 0;
+        IntPtr WatchTaskbar(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            // WM_SHOWWINDOW arrives before the shell removes the old window.
+            // At that exact point another native taskbar window must exist.
+            if (message == 0x0018 && wParam == IntPtr.Zero
+                && !new[] { hiddenHandle, fixedHandle, freeHandle }.Any(other => other != hwnd
+                    && IsWindowVisible(other) && (GetWindowLong(other, -20) & 0x00040000) != 0)) taskbarGaps++;
+            return IntPtr.Zero;
+        }
+        Win32Properties.AddWndProcHookCallback(hidden, WatchTaskbar);
+        Win32Properties.AddWndProcHookCallback(fixedPrice, WatchTaskbar);
+        Win32Properties.AddWndProcHookCallback(freePrice, WatchTaskbar);
         HideSearch(hidden); await Idle();
         Check(!IsWindowVisible(hiddenHandle) && IsWindowVisible(fixedHandle) && fixedPrice.ShowInTaskbar && !freePrice.ShowInTaskbar
             && (GetWindowLong(fixedHandle, -20) & 0x00040000) != 0 && PopupTopmost.Read(fixedPrice) == true,
             "hidden search keeps a real WS_EX_APPWINDOW taskbar entry without losing the quote's native topmost flag");
+        Chord(fixedPrice); await Idle(); HideSearch(hidden); await Idle();
         fixedPrice.Close(); await Idle();
         Check(!IsWindow(fixedHandle) && IsWindow(hiddenHandle) && IsWindow(freeHandle) && freePrice.ShowInTaskbar
             && (GetWindowLong(freeHandle, -20) & 0x00040000) != 0,
             "closing a price normally transfers the native taskbar entry instead of ending other quotes");
+        Check(taskbarGaps == 0, "native taskbar visibility never drops during search hide, restore or representative close");
+        Win32Properties.RemoveWndProcHookCallback(hidden, WatchTaskbar);
+        Win32Properties.RemoveWndProcHookCallback(fixedPrice, WatchTaskbar);
+        Win32Properties.RemoveWndProcHookCallback(freePrice, WatchTaskbar);
         SendMessage(freeHandle, 0x0112, new IntPtr(0xF060), IntPtr.Zero);
         await Until(() => !IsWindow(hiddenHandle) && !IsWindow(freeHandle));
         Check(true, "the representative price's Windows taskbar Close command ends the whole hidden-search application");

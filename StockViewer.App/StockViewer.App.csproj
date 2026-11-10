@@ -9,7 +9,7 @@
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
     <DebugType>embedded</DebugType>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.2.1</Version>
+    <Version>2.2.2</Version>
     <Product>StockViewer</Product>
     <Description>국내·미국 주식과 ETF의 가격을 작은 한 줄 팝업으로 표시하는 Avalonia 데스크톱 앱</Description>
   </PropertyGroup>
