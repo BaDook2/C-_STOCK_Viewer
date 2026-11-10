@@ -15,6 +15,7 @@
           <SolidColorBrush x:Key="BlueBrush" Color="#3182F6" />
           <SolidColorBrush x:Key="BlueSoftBrush" Color="#E8F3FF" />
           <SolidColorBrush x:Key="RedBrush" Color="#F04452" />
+          <SolidColorBrush x:Key="LayoutFeedbackBrush" Color="#FFF0F0" />
           <SolidColorBrush x:Key="AccentBrush" Color="#3182F6" />
           <SolidColorBrush x:Key="AccentHoverBrush" Color="#2272E8" />
           <SolidColorBrush x:Key="AccentPressedBrush" Color="#1D63CC" />
@@ -34,6 +35,7 @@
           <SolidColorBrush x:Key="BlueBrush" Color="#78A9FF" />
           <SolidColorBrush x:Key="BlueSoftBrush" Color="#253B60" />
           <SolidColorBrush x:Key="RedBrush" Color="#FF7B82" />
+          <SolidColorBrush x:Key="LayoutFeedbackBrush" Color="#492B35" />
           <SolidColorBrush x:Key="AccentBrush" Color="#3182F6" />
           <SolidColorBrush x:Key="AccentHoverBrush" Color="#458FF8" />
           <SolidColorBrush x:Key="AccentPressedBrush" Color="#276DCE" />
@@ -81,6 +83,11 @@
     <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
   </Style>
   <Style Selector="Button.icon /template/ Border#Box"><Setter Property="CornerRadius" Value="6" /></Style>
+  <Style Selector="Button.icon.layout-feedback"><Setter Property="Foreground" Value="{DynamicResource RedBrush}" /></Style>
+  <Style Selector="Button.icon.layout-feedback /template/ Border#Box">
+    <Setter Property="Background" Value="{DynamicResource LayoutFeedbackBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource RedBrush}" />
+  </Style>
   <Style Selector="TextBox">
     <Setter Property="Padding" Value="9,4" /><Setter Property="FontSize" Value="12" />
     <Setter Property="MinWidth" Value="0" /><Setter Property="MinHeight" Value="0" />

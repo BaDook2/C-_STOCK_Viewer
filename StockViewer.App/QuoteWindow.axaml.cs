@@ -21,10 +21,11 @@ public partial class QuoteWindow : Window
     public string DisplayedPrice => PriceText.Text ?? "";
     public string StatusMessage { get; private set; } = "시세 연결 대기";
     public event EventHandler? SearchRequested;
+    internal event EventHandler? NativeAppCloseRequested;
     private bool leftButtonDown, rightButtonDown, closeOnRelease, closeQueued, closed;
     private bool searchPending, searchDispatchQueued, resetRightClickCount, leftDragging;
     private bool rightClickCompleted;
-    private bool selectionGesture, groupRightAtPress;
+    private bool selectionGesture, closeGroupOnRelease;
     private readonly PopupSelection selection;
     private PixelPoint dragStartScreen, fixedPosition;
     private DateTimeOffset? latestSourceTime, lastResponseAt;
@@ -80,7 +81,11 @@ public partial class QuoteWindow : Window
     public void SetFixed(bool enabled)
     { fixedPosition = Position; IsFixed = enabled; Topmost = enabled; PopupTopmost.Update(this); SetStatus(StatusMessage); }
     internal void SetSelected(bool enabled)
-    { if (IsSelected == enabled) return; IsSelected = enabled; RefreshOutline(); RefreshTitle(); SetStatus(StatusMessage); }
+    {
+        if (IsSelected == enabled) return;
+        IsSelected = enabled; rightClickCompleted = false; resetRightClickCount = true;
+        RefreshOutline(); RefreshTitle(); SetStatus(StatusMessage);
+    }
     private void RefreshOutline() => Card.Classes.Set("selected", IsSelected);
     private IBrush ResourceBrush(string key) => (IBrush)this.FindResource(ActualThemeVariant, key)!;
     private void RefreshQuoteColors()
@@ -128,7 +133,7 @@ public partial class QuoteWindow : Window
         StatusMessage = message;
         Avalonia.Automation.AutomationProperties.SetHelpText(this,
             (IsSelected ? "선택됨 · " : "") + (IsFixed ? "맨 위 고정 · 위치 고정" : "고정 해제 · 드래그로 이동"));
-        ToolTip.SetTip(Card, message + $"\n{(IsFixed ? "Fix" : "Free")}{(IsSelected ? " · 선택됨" : "")} · Ctrl+클릭: 선택 전환\n우클릭: 선택 창 고정 전환 · 우클릭 두 번: 단일 창 닫기\n좌우 버튼 동시 클릭: 근처에 검색창 표시");
+        ToolTip.SetTip(Card, message + $"\n{(IsFixed ? "Fix" : "Free")}{(IsSelected ? " · 선택됨" : "")} · Ctrl+클릭: 선택 전환\n우클릭: 선택 창 고정 전환 · 우클릭 두 번: 선택 창 닫기\n좌우 버튼 동시 클릭: 근처에 검색창 표시");
     }
     private void RefreshStatus()
     {
@@ -163,6 +168,7 @@ public partial class QuoteWindow : Window
         {
             rightButtonDown = true; leftButtonDown |= otherButtonPressed;
             closeOnRelease = rightClickCompleted && !resetRightClickCount && clickCount >= 2; resetRightClickCount = false;
+            closeGroupOnRelease = closeOnRelease;
         }
         if (leftButtonDown && rightButtonDown || searchPending) BeginSearchGesture();
         else if ((modifiers & (KeyModifiers.Control | (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.None))) != 0
@@ -174,8 +180,7 @@ public partial class QuoteWindow : Window
         else if (button == MouseButton.Left) { selectionGesture = false; selection.BeginMove(this); }
         else
         {
-            selectionGesture = false; groupRightAtPress = selection.IsGroup(this);
-            if (groupRightAtPress) closeOnRelease = false;
+            selectionGesture = false;
         }
         capturedPointer?.Capture(this);
     }
@@ -194,9 +199,10 @@ public partial class QuoteWindow : Window
         {
             if (leftButtonDown || rightButtonDown || closeQueued) return;
             closeOnRelease = false; closeQueued = true;
-            Dispatcher.UIThread.Post(() => { if (!closed) { ReleaseCapture(); Close(); } }, DispatcherPriority.Background); return;
+            var closeGroup = closeGroupOnRelease;
+            Dispatcher.UIThread.Post(() => { if (!closed) { ReleaseCapture(); if (closeGroup) selection.CloseSelection(this); else Close(); } }, DispatcherPriority.Background); return;
         }
-        if (button == MouseButton.Right && wasDown) { rightClickCompleted = !groupRightAtPress; selection.RightClick(this); }
+        if (button == MouseButton.Right && wasDown) { rightClickCompleted = true; selection.RightClick(this); }
         if (!leftButtonDown && !rightButtonDown) ReleaseCapture();
     }
     private void ReleaseCapture()
@@ -260,10 +266,12 @@ public partial class QuoteWindow : Window
     {
         if (e.Key != Key.Escape) return;
         e.Handled = true;
-        if (leftButtonDown || rightButtonDown) { searchPending = false; closeOnRelease = true; } else Close();
+        if (leftButtonDown || rightButtonDown) { searchPending = false; closeOnRelease = true; closeGroupOnRelease = false; } else Close();
     }
     private IntPtr WindowMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == 0x0010 && ShowInTaskbar && NativeAppCloseRequested is { } closeApplication)
+        { handled = true; closeApplication(this, EventArgs.Empty); return IntPtr.Zero; }
         if (msg == 0x007B) { handled = true; return IntPtr.Zero; }
         if (msg == 0x0046 && lParam != IntPtr.Zero)
         {

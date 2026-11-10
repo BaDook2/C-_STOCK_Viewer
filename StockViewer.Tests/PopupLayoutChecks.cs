@@ -63,6 +63,8 @@ internal static partial class Program
         slow.Requests.Single(r => r.Code == saved.Popups[0].Stock.Code).Reply.TrySetResult(new(saved.Popups[0].Stock.Code, 12000, 1, DateTimeOffset.UtcNow));
         Check(!await restoring && retained.IsVisible && partial.Popups.Count == 2 && partial.PendingQuoteCount == 0,
             "a partial feed timeout keeps existing windows and successfully restored quotes");
+        Check(partial.DataDelayNotice is null && partial.OwnedWindows.Count == 0,
+            "a layout restoration timeout does not create a data-delay or layout notice popup");
         Check(store.LoadPopupLayout()!.Popups.Length == 2 && Find<Button>(partial, "LoadLayoutButton").IsEnabled,
             "failed restoration preserves the disk snapshot and enables retry");
         partial.Close(); foreach (var request in slow.Requests) request.Reply.TrySetCanceled();

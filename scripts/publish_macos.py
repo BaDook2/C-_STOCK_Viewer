@@ -11,14 +11,14 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default="2.2.0")
+    parser.add_argument("--version", default="2.2.1")
     parser.add_argument("--runtime", choices=["osx-arm64", "osx-x64"], required=True)
     parser.add_argument("--output", type=Path, default=Path("artifacts/release"))
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("macOS is required for code signing and bundle ZIP creation")
     if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", args.version):
-        parser.error("version must have the form 2.2.0")
+        parser.error("version must have the form 2.2.1")
     root = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)

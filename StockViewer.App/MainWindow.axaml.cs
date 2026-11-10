@@ -97,7 +97,7 @@ public partial class MainWindow : Window
         closing = true; lifetime.Cancel(); session.Cancel();
         CancelPendingOpens();
         dataDelayNotice?.Close();
-        layoutNotice?.Close();
+        StopLayoutFeedback();
         foreach (var popup in popups.Values.ToArray()) popup.Close();
         selection.Dispose();
         try { if (service is not null) await service.DisposeAsync(); }
@@ -113,6 +113,7 @@ public partial class MainWindow : Window
         if (closing || windowClosed || sender is not QuoteWindow popup || !popup.IsVisible
             || !popups.TryGetValue(popup.Stock.Code, out var current) || !ReferenceEquals(current, popup)) return;
         searchHidden = false; DismissSuggestions();
+        RefreshTaskbarPopup();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         WindowStartupLocation = WindowStartupLocation.Manual;
         PopupPlacement.BelowQuote(this, popup);
@@ -225,7 +226,7 @@ public partial class MainWindow : Window
         }
         catch (TimeoutException)
         {
-            if (!closing && !searchHidden && !request.Cancellation.IsCancellationRequested)
+            if (!closing && !searchHidden && !request.Cancellation.IsCancellationRequested && request.Placement is null)
             {
                 if (dataDelayNotice is null)
                 {
@@ -261,12 +262,15 @@ public partial class MainWindow : Window
     {
         if (popups.Remove(stock.Code, out var old)) old.Close();
         var popup = new QuoteWindow(stock, showName, selection);
+        popup.NativeAppCloseRequested += CloseFromTaskbar;
         popups[stock.Code] = popup; popup.SearchRequested += ShowSearchNearQuote;
         popup.Closed += async (_, _) =>
         {
             popup.SearchRequested -= ShowSearchNearQuote;
+            popup.NativeAppCloseRequested -= CloseFromTaskbar;
             if (!popups.TryGetValue(stock.Code, out var current) || !ReferenceEquals(current, popup)) return;
             popups.Remove(stock.Code);
+            RefreshTaskbarPopup();
             if (searchHidden && popups.Count == 0) await EndSessionAsync();
             else await UpdateSubscriptionsAsync();
         };
@@ -408,6 +412,7 @@ public partial class MainWindow : Window
         if (searchHidden) return;
         if (popups.Count == 0) { Close(); return; }
         searchVisibilityVersion++; searchHidden = true;
-        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); layoutNotice?.Close(); Hide();
+        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); StopLayoutFeedback(); Hide();
+        RefreshTaskbarPopup();
     }
 }

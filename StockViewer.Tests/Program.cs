@@ -37,7 +37,7 @@ internal static partial class Program
                 {
                     SettingsMigrationTests();
                     if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await FastPollingTests(); }
-                    await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await PopupLayoutTests(); await MultipleTopmostTests(); await SelectionTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
+                    await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await PopupLayoutTests(); await LayoutFeedbackTests(); await TaskbarPersistenceTests(); await MultipleTopmostTests(); await SelectionTests(); await GroupCloseTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
                     if (!native) await PointerPipelineTests();
                     if (native) await NativeWindowChecks();
                 }

@@ -37,6 +37,22 @@ internal static partial class Program
         SendMessage(taskbarHandle, 0x0112, new IntPtr(0xF060), IntPtr.Zero); // WM_SYSCOMMAND / SC_CLOSE, like the taskbar's Close window.
         await Until(() => !IsWindow(taskbarHandle) && !IsWindow(firstHandle) && !IsWindow(secondHandle));
         Check(true, "Windows taskbar system-close destroys search and every fixed or free quote HWND");
+        var hidden = MakeMain(); await hidden.UseServiceAsync(new DemoMarketData(), DemoMarketData.SampleStocks);
+        var fixedPrice = (await hidden.OpenStockAsync(DemoMarketData.SampleStocks[0]))!;
+        var freePrice = (await hidden.OpenStockAsync(DemoMarketData.SampleStocks[1]))!; fixedPrice.SetFixed(true);
+        var hiddenHandle = hidden.TryGetPlatformHandle()!.Handle;
+        var fixedHandle = fixedPrice.TryGetPlatformHandle()!.Handle; var freeHandle = freePrice.TryGetPlatformHandle()!.Handle;
+        HideSearch(hidden); await Idle();
+        Check(!IsWindowVisible(hiddenHandle) && IsWindowVisible(fixedHandle) && fixedPrice.ShowInTaskbar && !freePrice.ShowInTaskbar
+            && (GetWindowLong(fixedHandle, -20) & 0x00040000) != 0 && PopupTopmost.Read(fixedPrice) == true,
+            "hidden search keeps a real WS_EX_APPWINDOW taskbar entry without losing the quote's native topmost flag");
+        fixedPrice.Close(); await Idle();
+        Check(!IsWindow(fixedHandle) && IsWindow(hiddenHandle) && IsWindow(freeHandle) && freePrice.ShowInTaskbar
+            && (GetWindowLong(freeHandle, -20) & 0x00040000) != 0,
+            "closing a price normally transfers the native taskbar entry instead of ending other quotes");
+        SendMessage(freeHandle, 0x0112, new IntPtr(0xF060), IntPtr.Zero);
+        await Until(() => !IsWindow(hiddenHandle) && !IsWindow(freeHandle));
+        Check(true, "the representative price's Windows taskbar Close command ends the whole hidden-search application");
     }
     private static async Task MacDesktopHitChecks()
     {
@@ -85,4 +101,5 @@ internal static partial class Program
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr hwnd, int index);
 }

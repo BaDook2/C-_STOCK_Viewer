@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version = '2.2.0',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version = '2.2.1',
     [ValidateSet('win-x64','win-arm64','linux-x64','osx-arm64','osx-x64')][string]$Runtime = 'win-x64',
     [string]$OutputDirectory = 'publish',
     [switch]$SkipRootCopy

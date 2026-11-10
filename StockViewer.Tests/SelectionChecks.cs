@@ -46,10 +46,10 @@ internal static partial class Program
             Check(windows.Take(2).All(w => !w.IsFixed && !w.Topmost && w.IsSelected && w.IsVisible)
                 && windows.Select(w => w.Position).SequenceEqual(positions),
                 "right-clicking a mixed fixed/free selection unpins every selected window without moving or closing one");
-            RightClick(windows[0], 2); await Idle();
+            RightClick(windows[0], 1); await Idle();
             Check(windows.Take(2).All(w => w.IsFixed && w.Topmost && w.IsVisible) && !windows[2].IsFixed,
-                "right-clicking an entirely free selection pins it without touching other windows or double-closing");
-            RightClick(windows[1], 2); GroupDrag(windows[1], 73, 48); await Idle();
+                "right-clicking an entirely free selection pins it without touching other windows");
+            RightClick(windows[1], 1); GroupDrag(windows[1], 73, 48); await Idle();
             Check(windows[0].Position == new PixelPoint(positions[0].X + 73, positions[0].Y + 48)
                 && windows[1].Position == new PixelPoint(positions[1].X + 73, positions[1].Y + 48) && windows[2].Position == positions[2],
                 "dragging one selected price moves the group by exactly the same screen delta and keeps its spacing");
@@ -156,6 +156,14 @@ internal static partial class Program
                 "unselected quote hover uses the same subtle outline as selection");
             first.MouseMove(new(-15, -15)); await Idle();
             Check(BrushColor(Find<Border>(first, "Card").BorderBrush) == ThemeColor(first, "LineBrush"), "leaving an unselected quote restores the normal outline");
+            first.MouseDown(point, MouseButton.Left, RawInputModifiers.Control); first.MouseUp(point, MouseButton.Left, RawInputModifiers.Control);
+            second.MouseDown(point, MouseButton.Left, RawInputModifiers.Control); second.MouseUp(point, MouseButton.Left, RawInputModifiers.Control);
+            second.MouseDown(point, MouseButton.Right); second.MouseUp(point, MouseButton.Right);
+            second.MouseDown(point, MouseButton.Right);
+            Check(first.IsVisible && second.IsVisible, "raw group double-click preserves both windows until the final up event");
+            second.MouseUp(point, MouseButton.Right); await Idle();
+            Check(!first.IsVisible && !second.IsVisible && main.Popups.Count == 0 && main.SelectedPopups.Count == 0,
+                "real Avalonia double right-click input closes the entire selected group and releases capture");
         }
         finally { main.Close(); }
     }

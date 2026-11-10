@@ -56,7 +56,12 @@ internal sealed class PopupSelection(bool observeDesktop = false) : IDisposable
             if (window.IsVisible) window.Position = new(origin.X + dx, origin.Y + dy);
     }
     public void CancelMove() { moving = null; moveAnchor = null; }
-    public bool IsGroup(QuoteWindow window) => selected.Count > 1 && selected.Contains(window);
+    public void CloseSelection(QuoteWindow window)
+    {
+        CancelMove();
+        var targets = selected.Contains(window) ? selected.ToArray() : [window];
+        foreach (var target in targets) if (target.IsVisible) target.Close();
+    }
     public void RightClick(QuoteWindow window)
     {
         CancelMove();

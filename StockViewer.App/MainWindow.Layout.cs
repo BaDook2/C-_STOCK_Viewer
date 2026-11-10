@@ -1,13 +1,15 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Automation;
+using Avalonia.Threading;
 using StockViewer.Core;
 
 namespace StockViewer.Desktop;
 
 public partial class MainWindow
 {
-    private LayoutNoticeWindow? layoutNotice;
+    private readonly Dictionary<Button, DispatcherTimer> layoutFeedback = [];
     private bool restoringLayout;
     public string LayoutMessage { get; private set; } = "";
     private static PopupState CapturePopup(QuoteWindow popup) => new(popup.Stock,
@@ -81,24 +83,33 @@ public partial class MainWindow
         popup.Position = desired;
         popup.SetFixed(state.IsFixed);
     }
-    private void ShowLayoutNotice()
+    private void FlashLayoutButton(Button button)
     {
         if (closing || searchHidden) return;
-        if (layoutNotice is null)
+        if (!layoutFeedback.TryGetValue(button, out var timer))
         {
-            var notice = new LayoutNoticeWindow(); layoutNotice = notice;
-            notice.Closed += (_, _) => { if (ReferenceEquals(layoutNotice, notice)) layoutNotice = null; };
-            notice.SetMessage(LayoutMessage); notice.Show(this);
+            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            timer.Tick += (_, _) => { timer.Stop(); button.Classes.Remove("layout-feedback"); };
+            layoutFeedback.Add(button, timer);
         }
-        else { layoutNotice.SetMessage(LayoutMessage); layoutNotice.Activate(); }
+        timer.Stop(); button.Classes.Add("layout-feedback");
+        ToolTip.SetIsOpen(button, false); timer.Start();
+    }
+    private void StopLayoutFeedback()
+    {
+        foreach (var (button, timer) in layoutFeedback) { timer.Stop(); button.Classes.Remove("layout-feedback"); }
     }
     private void SaveLayoutClicked(object? sender, RoutedEventArgs e)
-    { SavePopupLayout(); ShowLayoutNotice(); }
+    {
+        FlashLayoutButton(SaveLayoutButton); SavePopupLayout();
+        AutomationProperties.SetHelpText(SaveLayoutButton, LayoutMessage);
+    }
     private async void LoadLayoutClicked(object? sender, RoutedEventArgs e)
     {
+        FlashLayoutButton(LoadLayoutButton);
         try { await RestorePopupLayoutAsync(); }
         catch (Exception error) when (IsDataError(error))
         { LayoutMessage = "가격창 배치를 불러오지 못했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요."; }
-        ShowLayoutNotice();
+        AutomationProperties.SetHelpText(LoadLayoutButton, LayoutMessage);
     }
 }

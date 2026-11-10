@@ -24,14 +24,14 @@
 Windows PowerShell:
 
 ```powershell
-./Publish.ps1 -Version 2.2.0 -Runtime win-x64 -OutputDirectory artifacts/release-win -SkipRootCopy
+./Publish.ps1 -Version 2.2.1 -Runtime win-x64 -OutputDirectory artifacts/release-win -SkipRootCopy
 ```
 
 Mac:
 
 ```sh
-python3 scripts/publish_macos.py --version 2.2.0 --runtime osx-arm64 --output artifacts/release-arm64
-python3 scripts/smoke_macos.py --version 2.2.0 --runtime osx-arm64 --directory artifacts/release-arm64
+python3 scripts/publish_macos.py --version 2.2.1 --runtime osx-arm64 --output artifacts/release-arm64
+python3 scripts/smoke_macos.py --version 2.2.1 --runtime osx-arm64 --directory artifacts/release-arm64
 ```
 
 Intel Mac에서는 `osx-x64`를 사용합니다. 출력 디렉터리는 같은 앱·ZIP·작업 페이로드가 없는 새 디렉터리를 사용합니다. `ditto`로 ZIP을 만들어 실행 권한과 코드 서명 메타데이터를 보존합니다.
