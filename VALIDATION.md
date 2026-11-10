@@ -112,3 +112,8 @@
 - 대표 가격창 종료도 Closed 후 이전하던 방식에서 Closing 중 다음 창을 먼저 등록하도록 수정함. 일반 창 닫기·선택 그룹 닫기와 작업표시줄의 전체 종료 구분을 유지함.
 - 헤드리스 회귀 434개 통과. 숨김·복원·대표 종료의 모든 IsVisible·ShowInTaskbar 변경 순간에 표시할 창이 1개 이상인지 확인하는 검사를 추가함. Windows에서는 실제 WM_SHOWWINDOW로 이전 창이 숨겨지는 순간 다른 WS_EX_APPWINDOW 창이 이미 표시되어 있는지 검증함.
 - 최종 로컬 Release 빌드 경고 0/오류 0, Mac 실제 창 검증 240개 통과.
+- [v2.2.2 릴리즈 workflow](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42791995863) 전체 성공. 세 플랫폼 헤드리스 각 434개, 실제 창 검증 Windows 248개·두 Mac 각 240개 통과. 실제 Windows WM_SHOWWINDOW 검사에서 숨김·복원·대표 종료 중 작업표시줄 표시 공백이 0회임을 확인함.
+- Windows EXE 단독 시작 및 두 Mac ZIP 압축 해제·서명·아키텍처·독립 시작을 통과하고 [v2.2.2](https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v2.2.2)를 최신 정식 릴리즈로 게시함. 실제 태그 대상 커밋 9198a677f9b542d668c06312559f66613fcbe9dc를 별도 fetch로 확인함.
+- 첨부 파일 3개를 다시 내려받아 GitHub digest·크기·SHA256SUMS를 대조하고 Windows PE x64, 두 Mac 앱과 네이티브 모듈의 CPU·버전·번들 서명을 확인함. 검증 파일은 outputs/v2.2.2에 보관함.
+- SHA-256 Windows: 9ccf465cbf40292ec8bf8b829c756cdeb0044b5466ba2e5b4ff89ed7e0ebf331; Mac arm64: 1a88a2fcd2de06a1669e133258d0aeb0437fdd72014e19fc4e4e993e008eb02b; Mac x64: 4800ccce93e14366e6797cdcdba042602de97f99a113fa136f584956ce8946d0.
+- 루트 앱을 검증된 공식 v2.2.2로 교체하고 직접 실행해 배치 불러오기 후 실제 가격창 표시를 확인함. 기존 저장 배치는 팝업 20개·고정 20개를 유지함. 프로젝트의 실행용 .app은 하나이며 배포 보관본은 현재 v2.2.2와 이전 v2.2.1·v2.2.0만 유지함. 교체 전 앱과 더 오래된 로컬 보관본은 휴지통으로 이동함.
