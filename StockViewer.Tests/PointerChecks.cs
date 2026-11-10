@@ -3,6 +3,8 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.VisualTree;
 using StockViewer.Core;
 using StockViewer.Desktop;
 
@@ -13,6 +15,7 @@ internal static partial class Program
     private static RawInputModifiers Held(MouseButton button) => button == MouseButton.Left ? RawInputModifiers.LeftMouseButton : RawInputModifiers.RightMouseButton;
     private static async Task PointerPipelineTests()
     {
+        await HoverAppearanceTests();
         foreach (var first in new[] { MouseButton.Left, MouseButton.Right })
         foreach (var releaseFirst in new[] { MouseButton.Left, MouseButton.Right })
         {
@@ -64,5 +67,41 @@ internal static partial class Program
         main.MouseDown(closePoint, MouseButton.Left); main.MouseUp(closePoint, MouseButton.Left); await Idle();
         Check(!main.IsVisible && popupStock.IsVisible, "first actual X click hides search even when autocomplete is open");
         popupStock.Close(); await Idle();
+    }
+    private static async Task HoverAppearanceTests()
+    {
+        var main = MakeMain(); await Idle();
+        try
+        {
+            foreach (var dark in new[] { false, true })
+            {
+                Application.Current!.RequestedThemeVariant = dark ? Avalonia.Styling.ThemeVariant.Dark : Avalonia.Styling.ThemeVariant.Light;
+                await Idle();
+                foreach (var name in new[] { "SearchButton", "ThemeButton", "MinimizeButton", "CloseButton", "DisplayName", "SearchBox" })
+                {
+                    main.MouseMove(new Point(-10, -10)); await Idle();
+                    var control = Find<Control>(main, name);
+                    var foreground = control is Avalonia.Controls.Primitives.TemplatedControl tc ? tc.Foreground : null;
+                    var point = control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), main)!.Value;
+                    var texts = control.GetVisualDescendants().OfType<TextBlock>().Select(t => (Text: t, Foreground: t.Foreground)).ToArray();
+                    main.MouseMove(point); await Idle();
+                    Check(control.IsPointerOver && texts.All(t => BrushColor(t.Text.Foreground) == BrushColor(t.Foreground))
+                        && (control is not Avalonia.Controls.Primitives.TemplatedControl hovered || BrushColor(hovered.Foreground) == BrushColor(foreground)),
+                        $"{name} hover preserves text colours in {(dark ? "dark" : "light")} mode (over={control.IsPointerOver}; before={foreground}; after={(control as Avalonia.Controls.Primitives.TemplatedControl)?.Foreground})");
+                    Check(texts.All(t => t.Text.Background is null || t.Text.Background is ISolidColorBrush b && b.Color.A == 0)
+                        && control.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.ContentPresenter>()
+                            .All(p => p.Background is null || p.Background is ISolidColorBrush b && b.Color.A == 0),
+                        $"{name} hover adds no grey text highlighter in {(dark ? "dark" : "light")} mode");
+                    if (name == "SearchButton")
+                    {
+                        var box = control.GetVisualDescendants().OfType<Border>().First(b => b.Name == "Box");
+                        Check(box.Opacity == 1 && BrushColor(box.Background) == ThemeColor(control, "AccentHoverBrush"),
+                            "search hover changes its outer background while keeping content fully opaque");
+                        SaveImage(main, dark ? "search-hover-dark.png" : "search-hover-light.png");
+                    }
+                }
+            }
+        }
+        finally { main.Close(); Application.Current!.RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light; }
     }
 }

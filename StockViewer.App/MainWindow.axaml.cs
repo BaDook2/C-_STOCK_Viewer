@@ -14,6 +14,17 @@ public partial class MainWindow : Window
 {
     private readonly SettingsStore settings;
     private readonly Dictionary<string, QuoteWindow> popups = [];
+    private readonly Dictionary<string, PendingOpen> pendingOpens = [];
+    private DataDelayWindow? dataDelayNotice;
+    private sealed class PendingOpen(bool showName, CancellationToken token) : IDisposable
+    {
+        public bool ShowName { get; } = showName;
+        public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(token);
+        public TaskCompletionSource<Quote> Quote { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<QuoteWindow?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ConnectionStatus? Status { get; set; }
+        public void Dispose() { Cancellation.Cancel(); Cancellation.Dispose(); }
+    }
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource session = new();
     private IReadOnlyList<Stock> stocks;
@@ -25,6 +36,8 @@ public partial class MainWindow : Window
     private long searchVisibilityVersion;
     public event EventHandler? SessionEnded;
     public IReadOnlyDictionary<string, QuoteWindow> Popups => popups;
+    public int PendingQuoteCount => pendingOpens.Count;
+    public DataDelayWindow? DataDelayNotice => dataDelayNotice;
     public string StatusMessage => connection.Message;
     public MainWindow() : this(null, true) { }
     public MainWindow(SettingsStore? store, bool autoConnect = true)
@@ -63,29 +76,29 @@ public partial class MainWindow : Window
             catch (Exception e) when (IsDataError(e) || e is UnauthorizedAccessException)
             { if (!closing) ShowStatus(new("공개 시세 연결 실패 · 네트워크를 확인해 주세요")); }
         };
-        Closing += (_, e) =>
-        {
-            if (closing || popups.Count == 0) return;
-            e.Cancel = true; searchVisibilityVersion++; searchHidden = true;
-            DismissSuggestions(); CancelPendingSearch(); Hide();
-        };
+        // Native taskbar/Dock/Alt+F4 close ends the whole application. Only the
+        // custom X button below may hide search while quote windows remain.
+        Closing += (_, _) => { if (!closing) _ = EndSessionAsync(closeSearch: false); };
         Closed += async (_, _) =>
         {
             windowClosed = true; searchHidden = true; DismissSuggestions(); CancelPendingSearch();
-            if (popups.Count == 0) await EndSessionAsync();
+            if (!closing) await EndSessionAsync();
         };
     }
     private static bool IsDataError(Exception e) => e is IOException or InvalidDataException or InvalidOperationException
         or System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException;
-    private async Task EndSessionAsync()
+    private async Task EndSessionAsync(bool closeSearch = true)
     {
         if (closing) return;
         closing = true; lifetime.Cancel(); session.Cancel();
+        CancelPendingOpens();
+        dataDelayNotice?.Close();
+        foreach (var popup in popups.Values.ToArray()) popup.Close();
         try { if (service is not null) await service.DisposeAsync(); }
         finally
         {
             session.Dispose(); lifetime.Dispose();
-            if (!windowClosed) Close();
+            if (closeSearch && !windowClosed) Close();
             SessionEnded?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -124,13 +137,17 @@ public partial class MainWindow : Window
     {
         if (closing) { await client.DisposeAsync(); return; }
         if (client is PublicMarketData publicData) publicData.RegisterStocks(catalog);
+        CancelPendingOpens();
         CancelPendingSearch(); session.Cancel(); session.Dispose(); session = new();
         var previous = service; service = client; stocks = catalog;
         if (previous is not null) await previous.DisposeAsync();
         if (closing) { await client.DisposeAsync(); return; }
         foreach (var popup in popups.Values) popup.ResetQuote();
         client.QuoteReceived += quote => DispatchFromService(client, () =>
-        { if (popups.TryGetValue(quote.Code, out var popup)) popup.ApplyQuote(quote); });
+        {
+            if (popups.TryGetValue(quote.Code, out var popup)) popup.ApplyQuote(quote);
+            if (quote.Price > 0 && pendingOpens.TryGetValue(quote.Code, out var request)) request.Quote.TrySetResult(quote);
+        });
         client.StatusChanged += status => DispatchFromService(client, () => ShowStatus(status));
         ShowStatus(new(client.IsDemo ? "데모 모드 · 예시 가격" : "공개 시세 연결 · API 키 불필요", client.IsDemo, client.IsDemo));
         client.Start(); await UpdateSubscriptionsAsync();
@@ -145,7 +162,11 @@ public partial class MainWindow : Window
     private void ShowStatus(ConnectionStatus status)
     {
         if (status.Code is { } code)
-        { if (popups.TryGetValue(code, out var popup)) popup.SetConnection(status); return; }
+        {
+            if (popups.TryGetValue(code, out var popup)) popup.SetConnection(status);
+            if (pendingOpens.TryGetValue(code, out var request)) request.Status = status;
+            return;
+        }
         connection = status;
         foreach (var popup in popups.Values) popup.SetConnection(status);
     }
@@ -158,18 +179,80 @@ public partial class MainWindow : Window
     {
         var current = service;
         if (current is null || closing) return;
-        try { await current.SetSubscriptionsAsync(popups.Keys.ToArray(), session.Token); }
+        try { await current.SetSubscriptionsAsync(popups.Keys.Concat(pendingOpens.Keys).Distinct().ToArray(), session.Token); }
         catch (OperationCanceledException) { }
         catch (Exception e) when (IsDataError(e))
         { if (ReferenceEquals(service, current)) ShowStatus(new("구독 변경 실패 · 재연결 대기")); }
     }
-    public async Task<QuoteWindow?> OpenStockAsync(Stock stock)
+    public Task<QuoteWindow?> OpenStockAsync(Stock stock)
     {
-        if (closing || searchHidden) return null;
-        if (!popups.ContainsKey(stock.Code) && popups.Count >= 200)
-        { ShowStatus(new("동시에 최대 200개 종목까지 표시할 수 있어요.", connection.Connected, connection.IsDemo)); return null; }
+        if (closing || searchHidden) return Task.FromResult<QuoteWindow?>(null);
+        if (pendingOpens.TryGetValue(stock.Code, out var pending)) return pending.Completion.Task;
+        if (!popups.ContainsKey(stock.Code) && popups.Keys.Concat(pendingOpens.Keys).Distinct().Count() >= 200)
+        { ShowStatus(new("동시에 최대 200개 종목까지 표시할 수 있어요.", connection.Connected, connection.IsDemo)); return Task.FromResult<QuoteWindow?>(null); }
+        var request = new PendingOpen(DisplayName.IsChecked == true, session.Token);
+        pendingOpens.Add(stock.Code, request); DismissSuggestions();
+        _ = CompleteOpenAsync(stock, request, service);
+        return request.Completion.Task;
+    }
+    private void CancelPendingOpens()
+    {
+        foreach (var request in pendingOpens.Values.ToArray()) request.Cancellation.Cancel();
+        pendingOpens.Clear();
+    }
+    private async Task CompleteOpenAsync(Stock stock, PendingOpen request, IMarketDataService? client)
+    {
+        try
+        {
+            // Start the deadline before network subscription or snapshot work.
+            var firstQuote = request.Quote.Task.WaitAsync(TimeSpan.FromSeconds(3), request.Cancellation.Token);
+            _ = UpdateSubscriptionsAsync();
+            if (client is not null) _ = RequestInitialQuoteAsync(stock, request, client);
+            var quote = await firstQuote;
+            if (closing || searchHidden || request.Cancellation.IsCancellationRequested || !ReferenceEquals(service, client)
+                || !pendingOpens.TryGetValue(stock.Code, out var current) || !ReferenceEquals(current, request))
+            { request.Completion.TrySetResult(null); return; }
+            var popup = CreateQuoteWindow(stock, request.ShowName, quote, request.Status ?? connection);
+            request.Completion.TrySetResult(popup);
+        }
+        catch (TimeoutException)
+        {
+            if (!closing && !searchHidden && !request.Cancellation.IsCancellationRequested)
+            {
+                if (dataDelayNotice is null)
+                {
+                    var notice = new DataDelayWindow(); dataDelayNotice = notice;
+                    notice.Closed += (_, _) => { if (ReferenceEquals(dataDelayNotice, notice)) dataDelayNotice = null; };
+                    notice.AddStock(stock); notice.Show(this);
+                }
+                else { dataDelayNotice.AddStock(stock); dataDelayNotice.Activate(); }
+            }
+            request.Completion.TrySetResult(null);
+        }
+        catch (OperationCanceledException) when (request.Cancellation.IsCancellationRequested)
+        { request.Completion.TrySetResult(null); }
+        catch (Exception e) { request.Completion.TrySetException(e); }
+        finally
+        {
+            if (pendingOpens.TryGetValue(stock.Code, out var current) && ReferenceEquals(current, request)) pendingOpens.Remove(stock.Code);
+            request.Dispose();
+            await UpdateSubscriptionsAsync();
+        }
+    }
+    private async Task RequestInitialQuoteAsync(Stock stock, PendingOpen request, IMarketDataService client)
+    {
+        var token = request.Cancellation.Token;
+        try
+        {
+            var quote = await client.GetSnapshotAsync(stock.Code, token);
+            if (!token.IsCancellationRequested && quote.Code == stock.Code && quote.Price > 0) request.Quote.TrySetResult(quote);
+        }
+        catch (Exception e) when (IsDataError(e)) { /* The live subscription can still supply the first quote before the deadline. */ }
+    }
+    private QuoteWindow CreateQuoteWindow(Stock stock, bool showName, Quote quote, ConnectionStatus status)
+    {
         if (popups.Remove(stock.Code, out var old)) old.Close();
-        var popup = new QuoteWindow(stock, DisplayName.IsChecked == true);
+        var popup = new QuoteWindow(stock, showName);
         popups[stock.Code] = popup; popup.SearchRequested += ShowSearchNearQuote;
         popup.Closed += async (_, _) =>
         {
@@ -179,16 +262,10 @@ public partial class MainWindow : Window
             if (searchHidden && popups.Count == 0) await EndSessionAsync();
             else await UpdateSubscriptionsAsync();
         };
-        popup.SetConnection(connection);
+        popup.SetConnection(status); popup.ApplyQuote(quote);
         // Showing first initializes the native size. Measuring an unopened macOS
         // window can otherwise leave its client area at 0x0 until it is closed.
         popup.Show(); PopupPlacement.BelowSearch(popup, this, popups.Values); DismissSuggestions();
-        var initialPosition = popup.Position;
-        await UpdateSubscriptionsAsync();
-        if (service is { } currentService) await LoadQuoteAsync(popup, currentService, session.Token);
-        else popup.ShowError("시세 연결을 기다리는 중입니다.");
-        if (!searchHidden && popup.IsVisible && !popup.IsFixed && popup.Position == initialPosition)
-            PopupPlacement.BelowSearch(popup, this, popups.Values);
         return popup;
     }
     private async Task LoadQuoteAsync(QuoteWindow popup, IMarketDataService client, CancellationToken cancellation)
@@ -314,5 +391,11 @@ public partial class MainWindow : Window
     { if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { e.Handled = true; DismissSuggestions(); BeginMoveDrag(e); } }
     private void Minimize(object? sender, RoutedEventArgs e) { DismissSuggestions(); WindowState = WindowState.Minimized; }
     private void CloseApp(object? sender, RoutedEventArgs e)
-    { e.Handled = true; DismissSuggestions(); if (!searchHidden) Close(); }
+    {
+        e.Handled = true; DismissSuggestions();
+        if (searchHidden) return;
+        if (popups.Count == 0) { Close(); return; }
+        searchVisibilityVersion++; searchHidden = true;
+        CancelPendingSearch(); CancelPendingOpens(); dataDelayNotice?.Close(); Hide();
+    }
 }

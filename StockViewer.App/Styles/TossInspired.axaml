@@ -15,6 +15,8 @@
           <SolidColorBrush x:Key="BlueSoftBrush" Color="#E8F3FF" />
           <SolidColorBrush x:Key="RedBrush" Color="#F04452" />
           <SolidColorBrush x:Key="AccentBrush" Color="#3182F6" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#2272E8" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#1D63CC" />
           <SolidColorBrush x:Key="CheckBorderBrush" Color="#C9D0D7" />
           <SolidColorBrush x:Key="SelectionBrush" Color="#663182F6" />
         </ResourceDictionary>
@@ -31,6 +33,8 @@
           <SolidColorBrush x:Key="BlueSoftBrush" Color="#253B60" />
           <SolidColorBrush x:Key="RedBrush" Color="#FF7B82" />
           <SolidColorBrush x:Key="AccentBrush" Color="#3182F6" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#458FF8" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#276DCE" />
           <SolidColorBrush x:Key="CheckBorderBrush" Color="#58677D" />
           <SolidColorBrush x:Key="SelectionBrush" Color="#665885CD" />
         </ResourceDictionary>
@@ -52,21 +56,28 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" /><Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="HorizontalAlignment" Value="Stretch" /><Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="Template"><ControlTemplate>
-      <Border Name="Box" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
-        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+      <Border Name="Box" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}">
+        <ContentPresenter Name="ButtonContent" Background="Transparent" Foreground="{TemplateBinding Foreground}"
+                          Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
       </Border>
     </ControlTemplate></Setter>
   </Style>
-  <Style Selector="Button:pointerover /template/ Border#Box"><Setter Property="Opacity" Value="0.85" /></Style>
-  <Style Selector="Button:pressed /template/ Border#Box"><Setter Property="Opacity" Value="0.7" /></Style>
+  <Style Selector="Button:pointerover /template/ Border#Box">
+    <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BlueBrush}" />
+  </Style>
+  <Style Selector="Button:pressed /template/ Border#Box"><Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" /></Style>
   <Style Selector="Button:focus-visible /template/ Border#Box"><Setter Property="BoxShadow" Value="0 0 4 0 #593182F6" /></Style>
   <Style Selector="Button:disabled"><Setter Property="Opacity" Value="0.45" /><Setter Property="Cursor" Value="Arrow" /></Style>
   <Style Selector="Button.icon">
     <Setter Property="Background" Value="Transparent" /><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     <Setter Property="Width" Value="24" /><Setter Property="Height" Value="22" /><Setter Property="Padding" Value="0" />
   </Style>
-  <Style Selector="Button.icon:pointerover /template/ Border#Box"><Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" /></Style>
+  <Style Selector="Button.icon:pointerover /template/ Border#Box">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+  </Style>
   <Style Selector="Button.icon /template/ Border#Box"><Setter Property="CornerRadius" Value="6" /></Style>
   <Style Selector="TextBox">
     <Setter Property="Padding" Value="9,4" /><Setter Property="FontSize" Value="12" />
@@ -91,8 +102,8 @@
       </Border>
     </ControlTemplate></Setter>
   </Style>
-  <Style Selector="TextBox:pointerover"><Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" /><Setter Property="Background" Value="{DynamicResource SurfaceBrush}" /></Style>
-  <Style Selector="TextBox:focus"><Setter Property="BorderBrush" Value="{DynamicResource BlueBrush}" /><Setter Property="BorderThickness" Value="1" /><Setter Property="Background" Value="{DynamicResource SurfaceBrush}" /></Style>
+  <Style Selector="TextBox:pointerover"><Setter Property="BorderBrush" Value="{DynamicResource CheckBorderBrush}" /><Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" /><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" /></Style>
+  <Style Selector="TextBox:focus"><Setter Property="BorderBrush" Value="{DynamicResource BlueBrush}" /><Setter Property="BorderThickness" Value="1" /><Setter Property="Background" Value="{DynamicResource SurfaceBrush}" /><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" /></Style>
   <Style Selector="CheckBox">
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" /><Setter Property="FontSize" Value="11" />
     <Setter Property="MinWidth" Value="0" /><Setter Property="MinHeight" Value="0" />
@@ -103,7 +114,7 @@
         <Border Name="CheckBoxBox" Width="19" Height="19" CornerRadius="5" BorderBrush="{DynamicResource CheckBorderBrush}" BorderThickness="1.4" Background="{DynamicResource SurfaceBrush}">
           <Path Name="CheckMark" Data="M 3 8 L 7 12 L 14 4" Stroke="White" StrokeThickness="2" IsVisible="False" />
         </Border>
-        <ContentPresenter Name="PART_ContentPresenter" Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
+        <ContentPresenter Name="CheckContent" Background="Transparent" Foreground="{TemplateBinding Foreground}" Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
                           Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
       </Grid>
     </ControlTemplate></Setter>
@@ -111,18 +122,21 @@
   <Style Selector="CheckBox:checked /template/ Border#CheckBoxBox"><Setter Property="Background" Value="{DynamicResource AccentBrush}" /><Setter Property="BorderBrush" Value="{DynamicResource BlueBrush}" /></Style>
   <Style Selector="CheckBox:checked /template/ Path#CheckMark"><Setter Property="IsVisible" Value="True" /></Style>
   <Style Selector="CheckBox:pointerover /template/ Border#CheckBoxBox"><Setter Property="BorderBrush" Value="{DynamicResource BlueBrush}" /></Style>
+  <Style Selector="CheckBox:pointerover"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" /></Style>
+  <Style Selector="CheckBox:checked"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" /></Style>
+  <Style Selector="CheckBox:unchecked"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" /></Style>
   <Style Selector="ListBoxItem">
     <Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="6,6" />
     <Setter Property="MinHeight" Value="0" /><Setter Property="Focusable" Value="False" /><Setter Property="Cursor" Value="Hand" />
     <Setter Property="Template"><ControlTemplate>
-      <Border Name="Row" CornerRadius="8" Padding="{TemplateBinding Padding}" Background="Transparent">
-        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+      <Border Name="Row" CornerRadius="8" Padding="{TemplateBinding Padding}" Background="Transparent" BorderBrush="Transparent" BorderThickness="1">
+        <ContentPresenter Name="RowContent" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
       </Border>
     </ControlTemplate></Setter>
   </Style>
-  <Style Selector="ListBoxItem:pointerover /template/ Border#Row"><Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" /></Style>
+  <Style Selector="ListBoxItem:pointerover /template/ Border#Row"><Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" /><Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" /></Style>
   <Style Selector="ListBoxItem:selected /template/ Border#Row"><Setter Property="Background" Value="{DynamicResource BlueSoftBrush}" /></Style>
-  <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBoxItem:selected /template/ ContentPresenter#RowContent">
     <Setter Property="Background" Value="Transparent" /><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     <Setter Property="BorderBrush" Value="Transparent" />
   </Style>

@@ -67,16 +67,14 @@ internal static partial class Program
             await pending.UseServiceAsync(service, [apple, spy]); await Idle();
             var openingApple = pending.OpenStockAsync(apple);
             await handler.UsStarted.Task.WaitAsync(TimeSpan.FromSeconds(3)); await Idle();
-            var first = pending.Popups[apple.Code]; first.Position = new(first.Position.X, first.Position.Y + 8);
-            var moved = first.Position;
             var openingSpy = pending.OpenStockAsync(spy);
-            await Until(() => pending.Popups.Count == 2); await Idle();
-            Check(!Overlaps(WindowRect(first), WindowRect(pending.Popups[spy.Code])),
-                "quotes still loading their first price reserve their screen space");
+            await Until(() => pending.PendingQuoteCount == 2); await Idle();
+            Check(pending.Popups.Count == 0, "two pending prices create no placeholder quote windows");
             release.TrySetResult(); await Task.WhenAll(openingApple, openingSpy); await Idle();
-            Check(first.Position == moved, "a delayed first price does not snap a manually moved quote back to the search window");
-            Check(!Overlaps(WindowRect(first), WindowRect(pending.Popups[spy.Code])),
-                "first-price content growth and final placement keep pending quote windows separate");
+            var first = pending.Popups[apple.Code];
+            Check(first.LastQuote is not null && pending.Popups[spy.Code].LastQuote is not null
+                && !Overlaps(WindowRect(first), WindowRect(pending.Popups[spy.Code])),
+                "simultaneous first-price responses create fully populated and separate quote windows");
         }
         finally
         {

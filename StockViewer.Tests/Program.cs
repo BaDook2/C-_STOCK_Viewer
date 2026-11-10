@@ -37,7 +37,7 @@ internal static partial class Program
                 {
                     SettingsMigrationTests();
                     if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await FastPollingTests(); }
-                    await LoadingPopupTests(); await PlacementTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
+                    await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
                     if (!native) await PointerPipelineTests();
                     if (native) await NativeWindowChecks();
                 }
@@ -88,6 +88,7 @@ internal static partial class Program
         using var bitmap = new RenderTargetBitmap(PixelSize.FromSize(window.Bounds.Size, 1));
         bitmap.Render(window); bitmap.Save(Path.Combine("artifacts/ui", name), PngBitmapEncoderOptions.Default);
     }
+    private static void HideSearch(MainWindow main) => Find<Button>(main, "CloseButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     private static void RightClick(QuoteWindow popup, int count)
     { popup.ProcessMouseDown(MouseButton.Right, count); popup.ProcessMouseUp(MouseButton.Right); }
     private static string Tick(string code, string price, string percent) => JsonSerializer.Serialize(new
@@ -96,40 +97,6 @@ internal static partial class Program
     {
         popup.ProcessMouseDown(first, 2); popup.ProcessMouseDown(first == MouseButton.Left ? MouseButton.Right : MouseButton.Left, 2);
         popup.ProcessMouseUp(firstRelease); popup.ProcessMouseUp(firstRelease == MouseButton.Left ? MouseButton.Right : MouseButton.Left);
-    }
-    private static async Task LoadingPopupTests()
-    {
-        var apple = new Stock("US:AAPL.O", "애플", "NASDAQ", "AAPL");
-        var main = MakeMain(); var slow = new DelayedQuoteService { SearchResults = [apple] };
-        await main.UseServiceAsync(slow, DemoMarketData.SampleStocks); await Idle();
-        main.Activate();
-        var box = Find<TextBox>(main, "SearchBox"); box.Focus(); box.Text = "apple";
-        try
-        {
-            var results = Find<ListBox>(main, "SearchResults");
-            await Until(() => results.ItemCount == 1);
-            Check((results.SelectedItem as Stock)?.Code == apple.Code,
-                "English company search selects Apple from remote autocomplete");
-            Find<Button>(main, "SearchButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Until(() => slow.SnapshotRequested); await Idle();
-            var popup = main.Popups[apple.Code];
-            Check(popup.IsVisible && popup.Bounds.Width > 0 && popup.Bounds.Height == 32
-                && popup.ClientSize.Width > 0 && popup.ClientSize.Height == 32,
-                "Apple popup has a visible native client area while its first quote is pending");
-            Check(Math.Abs(popup.Position.X + popup.ClientSize.Width * popup.RenderScaling / 2
-                - main.Position.X - main.ClientSize.Width * main.RenderScaling / 2) <= popup.RenderScaling,
-                "the loading Apple popup is centered beneath search before its quote arrives");
-            slow.Snapshot.TrySetResult(new(apple.Code, 350.88m, 2.48m, DateTimeOffset.UtcNow, Currency: "USD"));
-            await Until(() => popup.LastQuote is not null); await Idle();
-            Check(popup.DisplayedPrice == "$350.88" && popup.ClientSize.Width > 0 && popup.ClientSize.Height == 32,
-                "a delayed Apple quote fills the existing visible popup without collapsing it");
-        }
-        finally
-        {
-            slow.Snapshot.TrySetCanceled();
-            foreach (var popup in main.Popups.Values.ToArray()) popup.Close();
-            main.Close();
-        }
     }
     private static async Task UiTests()
     {
@@ -181,7 +148,7 @@ internal static partial class Program
         SaveImage(us, "quote-us.png");
         us.ApplyQuote(new("US:AAPL.O", .1234m, -1, now.AddSeconds(1), Currency: "USD"));
         Check(us.DisplayedPrice == "$0.1234", "sub-dollar precision is preserved"); us.Close();
-        main.Close(); await Idle();
+        HideSearch(main); await Idle();
         Check(!main.IsVisible && replacement.IsVisible && second.IsVisible, "X hides search and keeps independent quotes alive");
         replacement.Close(); second.Close(); await Idle();
     }
@@ -271,7 +238,7 @@ internal static partial class Program
         var ended = 0; main.SessionEnded += (_, _) => ended++;
         var display = Find<CheckBox>(main, "DisplayName"); display.IsChecked = false;
         var box = Find<TextBox>(main, "SearchBox"); box.Text = "삼성";
-        main.Close(); await Idle(); Check(!main.IsVisible && popup.IsVisible && ended == 0, "X only hides search with prices open");
+        HideSearch(main); await Idle(); Check(!main.IsVisible && popup.IsVisible && ended == 0, "X only hides search with prices open");
         Chord(popup); await Idle();
         Check(main.IsVisible && main.Position.Y >= popup.Position.Y + popup.Bounds.Height * popup.RenderScaling, "chord recalls hidden search below the quote");
         Check(box.Text == "삼성" && display.IsChecked == false && !Find<Avalonia.Controls.Primitives.Popup>(main, "Suggestions").IsOpen, "recall preserves text and preference without opening autocomplete");
@@ -285,7 +252,7 @@ internal static partial class Program
             Check(main.Position.Y + main.Bounds.Height * main.RenderScaling <= popup.Position.Y, "native recall uses space above a quote at the bottom of its monitor");
         }
         var previous = popup.LastQuote;
-        main.Close(); await Until(() => !ReferenceEquals(previous, popup.LastQuote));
+        HideSearch(main); await Until(() => !ReferenceEquals(previous, popup.LastQuote));
         Check(!main.IsVisible && popup.IsVisible, "price updates continue while search is hidden");
         popup.Close(); await Until(() => ended == 1); Check(true, "last quote ends a hidden search session exactly once");
         var pending = MakeMain(); var slow = new DelayedQuoteService();
@@ -293,9 +260,10 @@ internal static partial class Program
         var opening = pending.OpenStockAsync(DemoMarketData.SampleStocks[0]);
         await Until(() => slow.SnapshotRequested);
         Check(pending.IsEnabled && Find<TextBox>(pending, "SearchBox").IsEnabled, "initial network wait never disables search input");
-        pending.Close(); var kept = pending.Popups.Values.Single();
-        slow.Snapshot.TrySetResult(new("005930", 73000, 1.5m, DateTimeOffset.UtcNow)); await opening;
-        Check(kept.DisplayedPrice == "73,000원" && !slow.Disposed, "pending quotes still complete after search hides");
-        kept.Close(); await Until(() => slow.Disposed); Check(true, "closing the final popup disposes its pending service");
+        pending.Close();
+        Check(await opening is null && pending.Popups.Count == 0, "native close cancels an initial quote before creating any price window");
+        slow.Snapshot.TrySetResult(new("005930", 73000, 1.5m, DateTimeOffset.UtcNow)); await Idle();
+        Check(slow.Disposed && pending.DataDelayNotice is null && pending.Popups.Count == 0,
+            "a late response after application close creates neither a quote nor a delay notice");
     }
 }

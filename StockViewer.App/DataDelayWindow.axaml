@@ -1,0 +1,16 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StockViewer.Desktop.DataDelayWindow" Title="시세 수신 지연 · StockViewer"
+        Width="350" SizeToContent="Height" MinHeight="160" CanResize="False" CanMinimize="False" CanMaximize="False"
+        WindowDecorations="None" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        TransparencyLevelHint="Transparent" Background="Transparent" KeyDown="NoticeKeyDown">
+  <Border Margin="4" Padding="18" CornerRadius="12" Background="{DynamicResource SurfaceBrush}"
+          BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+    <StackPanel Spacing="12">
+      <TextBlock Text="시세 수신 지연" FontSize="15" FontWeight="SemiBold" />
+      <TextBlock Name="StockNames" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" MaxHeight="80" />
+      <TextBlock Text="가격 데이터가 3초 이상 수신되지 않았습니다.&#10;네트워크 상태를 확인한 후 다시 검색해 주세요."
+                 FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" />
+      <Button Name="DismissButton" Content="확인" HorizontalAlignment="Right" MinWidth="66" Click="Dismiss" />
+    </StackPanel>
+  </Border>
+</Window>
