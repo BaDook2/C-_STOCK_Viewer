@@ -10,6 +10,7 @@ internal static partial class Program
 {
     private static async Task NativeWindowChecks()
     {
+        if (OperatingSystem.IsMacOS()) await MacDesktopHitChecks();
         if (!OperatingSystem.IsWindows()) return;
         var main = MakeMain(); await main.UseServiceAsync(new DemoMarketData(), DemoMarketData.SampleStocks);
         var quote = (await main.OpenStockAsync(DemoMarketData.SampleStocks[0]))!; await Idle();
@@ -37,6 +38,49 @@ internal static partial class Program
         await Until(() => !IsWindow(taskbarHandle) && !IsWindow(firstHandle) && !IsWindow(secondHandle));
         Check(true, "Windows taskbar system-close destroys search and every fixed or free quote HWND");
     }
+    private static async Task MacDesktopHitChecks()
+    {
+        var main = MakeMain();
+        try
+        {
+            var screen = main.Screens.Primary!;
+            var area = screen.WorkingArea;
+            PixelPoint? desktop = null;
+            for (var y = area.Bottom - 70; y > area.Y + 40 && desktop is null; y -= 100)
+            for (var x = area.Right - 80; x > area.X + 40; x -= 100)
+            {
+                var point = new PixelPoint(x, y);
+                if (DesktopMarqueeObserver.IsMacDesktopPoint(point)) { desktop = point; break; }
+            }
+            Check(desktop.HasValue, "macOS finds real desktop pixels despite the screen-sized transparent Dock window");
+            var location = desktop!.Value;
+            var overlay = new Window
+            {
+                Width = 120, Height = 90, Topmost = true, ShowInTaskbar = false,
+                WindowDecorations = WindowDecorations.None, WindowStartupLocation = WindowStartupLocation.Manual,
+                Position = new(location.X - 50, location.Y - 30),
+                TransparencyLevelHint = [WindowTransparencyLevel.Transparent], Background = Avalonia.Media.Brushes.Transparent
+            };
+            try
+            {
+                overlay.Show(); await Idle();
+                var handle = overlay.TryGetPlatformHandle()!;
+                var nativeWindow = handle.HandleDescriptor == "NSView" ? ObjcSend(handle.Handle, ObjcSelector("window")) : handle.Handle;
+                SetObjcFlag(nativeWindow, ObjcSelector("setIgnoresMouseEvents:"), true);
+                await Idle();
+                Check(DesktopMarqueeObserver.IsMacDesktopPoint(location), "desktop hit-testing ignores a full-opacity native window that passes mouse input through");
+                SetObjcFlag(nativeWindow, ObjcSelector("setIgnoresMouseEvents:"), false);
+                overlay.Background = Avalonia.Media.Brushes.White; await Idle();
+                Check(!DesktopMarqueeObserver.IsMacDesktopPoint(location), "desktop detection excludes ordinary clickable application windows");
+            }
+            finally { overlay.Close(); }
+            await Idle();
+            Check(DesktopMarqueeObserver.IsMacDesktopPoint(location), "closing an application window exposes the real desktop to selection again");
+        }
+        finally { main.Close(); }
+    }
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    private static extern void SetObjcFlag(IntPtr target, IntPtr selector, [MarshalAs(UnmanagedType.I1)] bool value);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);

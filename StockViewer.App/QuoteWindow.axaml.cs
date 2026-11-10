@@ -74,11 +74,13 @@ public partial class QuoteWindow : Window
         };
     }
     public void SetNameVisible(bool visible)
-    { StockName.IsVisible = visible; Title = visible ? Stock.Name + " · StockViewer" : "StockViewer"; }
+    { StockName.IsVisible = visible; RefreshTitle(); }
+    private void RefreshTitle() => Title = (NameVisible ? Stock.Name + " · StockViewer" : "StockViewer")
+        + (IsSelected ? " · 선택됨" : "");
     public void SetFixed(bool enabled)
     { fixedPosition = Position; IsFixed = enabled; Topmost = enabled; PopupTopmost.Update(this); SetStatus(StatusMessage); }
     internal void SetSelected(bool enabled)
-    { if (IsSelected == enabled) return; IsSelected = enabled; RefreshOutline(); SetStatus(StatusMessage); }
+    { if (IsSelected == enabled) return; IsSelected = enabled; RefreshOutline(); RefreshTitle(); SetStatus(StatusMessage); }
     private void RefreshOutline() => Card.Classes.Set("selected", IsSelected);
     private IBrush ResourceBrush(string key) => (IBrush)this.FindResource(ActualThemeVariant, key)!;
     private void RefreshQuoteColors()

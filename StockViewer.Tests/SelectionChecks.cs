@@ -35,6 +35,9 @@ internal static partial class Program
             ControlClick(windows[0]); ControlClick(windows[1]);
             Check(selection.Selected.Count == 2 && windows[0].IsSelected && windows[1].IsSelected && !windows[2].IsSelected,
                 "Control-click selects independent price windows without changing an unrelated quote");
+            var sizes = windows.Select(w => w.ClientSize).ToArray();
+            ControlClick(windows[0]); await Idle(); ControlClick(windows[0]); await Idle();
+            Check(windows.Select(w => w.ClientSize).SequenceEqual(sizes), "the thicker selection outline preserves the window and text layout sizes");
             ControlClick(windows[1]);
             Check(selection.Selected.Count == 1 && !windows[1].IsSelected && windows[0].IsSelected, "Control-click toggles just one selected quote off");
             windows[0].SetFixed(true); ControlClick(windows[1]);
@@ -61,9 +64,10 @@ internal static partial class Program
             foreach (var dark in new[] { false, true })
             {
                 Application.Current!.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light; await Idle();
-                Check(windows.Take(2).All(w => BrushColor(Find<Border>(w, "Card").BorderBrush) == ThemeColor(w, "PopupOutlineBrush"))
+                Check(windows.Take(2).All(w => BrushColor(Find<Border>(w, "Card").BorderBrush) == ThemeColor(w, "PopupOutlineBrush")
+                    && Find<Border>(w, "Card").BorderThickness == new Thickness(2))
                     && BrushColor(Find<Border>(windows[2], "Card").BorderBrush) == ThemeColor(windows[2], "LineBrush"),
-                    $"selected window outlines remain gently highlighted in {(dark ? "dark" : "light")} mode");
+                    $"selected window outlines are two pixels thick in {(dark ? "dark" : "light")} mode");
                 Check(windows.All(w => Find<Border>(w, "Card") is { Opacity: 1 } card
                     && BrushColor(card.Background) == ThemeColor(w, "SurfaceBrush"))
                     && BrushColor(Find<TextBlock>(windows[0], "PriceText").Foreground) == ThemeColor(windows[0], "RedBrush"),

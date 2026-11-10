@@ -13,6 +13,9 @@ internal abstract class DesktopMarqueeObserver : IDisposable
     public abstract void Dispose();
     public static DesktopMarqueeObserver? Start(PopupSelection selection) => OperatingSystem.IsWindows()
         ? new WindowsObserver(selection) : OperatingSystem.IsMacOS() ? new MacObserver(selection) : null;
+    internal static bool IsMacDesktopPoint(PixelPoint point) => MacDesktopPoint(point.X, point.Y) != 0;
+    [DllImport("libStockViewerDesktop.dylib", EntryPoint = "sv_desktop_is_desktop")]
+    private static extern int MacDesktopPoint(double x, double y);
 
     private sealed class WindowsObserver : DesktopMarqueeObserver
     {

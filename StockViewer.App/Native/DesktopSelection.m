@@ -11,21 +11,28 @@ typedef void (*SVDesktopCallback)(int, double, double, int);
 @implementation SVDesktopObserver
 @end
 
-// Inspect bounds only, without capturing screen contents or reading titles.
-// Excluding desktop elements makes Finder's wallpaper and icons eligible while
-// clicks on application windows, menus and the Dock remain untouched.
-static BOOL SVIsDesktop(CGPoint point) {
+// Ask AppKit where a click actually lands. A rectangle-only scan mistakes the
+// Dock's screen-sized, transparent, click-through window for an obstruction.
+// This API skips transparent pixels and windows that ignore mouse events.
+int sv_desktop_is_desktop(double x, double y) {
+    NSScreen *primary = NSScreen.screens.firstObject;
+    if (primary == nil) return NO;
+    NSInteger hit = [NSWindow windowNumberAtPoint:NSMakePoint(x, NSMaxY(primary.frame) - y)
+                    belowWindowWithWindowNumber:0];
+    if (hit <= 0) return NO;
     NSArray *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(
-        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
-    if (windows == nil) return NO;
-    for (NSDictionary *window in windows) {
-        NSNumber *alpha = window[(id)kCGWindowAlpha];
-        if (alpha != nil && alpha.doubleValue <= 0) continue;
-        CGRect bounds;
-        if (CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)window[(id)kCGWindowBounds], &bounds)
-            && CGRectContainsPoint(bounds, point)) return NO;
-    }
-    return YES;
+        kCGWindowListOptionIncludingWindow, (CGWindowID)hit));
+    NSDictionary *window = windows.firstObject;
+    if (window == nil) return NO;
+    pid_t pid = [window[(id)kCGWindowOwnerPID] intValue];
+    NSString *bundle = [NSRunningApplication runningApplicationWithProcessIdentifier:pid].bundleIdentifier;
+    NSInteger level = [window[(id)kCGWindowLayer] integerValue];
+    BOOL desktopOwner = [bundle isEqualToString:@"com.apple.finder"]
+        || [bundle isEqualToString:@"com.apple.dock"] || [bundle isEqualToString:@"com.apple.WindowManager"]
+        || [bundle isEqualToString:@"com.apple.wallpaper.agent"];
+    // Normal Finder file windows, the Dock bar, menus and desktop widgets must
+    // keep their own gestures. Only the system's background layers qualify.
+    return desktopOwner && level < 0;
 }
 
 void *sv_desktop_start(SVDesktopCallback callback) {
@@ -39,7 +46,7 @@ void *sv_desktop_start(SVDesktopCallback callback) {
             if (current == nil || event.CGEvent == NULL) return;
             CGPoint point = CGEventGetLocation(event.CGEvent);
             if (event.type == NSEventTypeLeftMouseDown) {
-                current.tracking = SVIsDesktop(point);
+                current.tracking = sv_desktop_is_desktop(point.x, point.y);
                 if (current.tracking) current.callback(1, point.x, point.y,
                     (event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagCommand)) != 0);
             } else if (current.tracking) {
