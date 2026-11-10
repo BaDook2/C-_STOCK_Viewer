@@ -1,0 +1,44 @@
+name: Verify Windows windows without publishing
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-windows:
+    name: Windows native popup checks
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and run regressions
+        run: |
+          dotnet build StockViewer.slnx -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+          dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll
+          if ($LASTEXITCODE -ne 0) { throw 'Regression checks failed.' }
+      - name: Verify real Windows popup handles
+        run: |
+          dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --native --ui-only
+          if ($LASTEXITCODE -ne 0) { throw 'Native window checks failed.' }
+      - name: Upload UI diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Windows-UI-checks
+          path: artifacts/ui/*.png
+          if-no-files-found: ignore
+          retention-days: 7
