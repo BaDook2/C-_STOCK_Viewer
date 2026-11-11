@@ -173,3 +173,10 @@
 - Release 빌드 경고 0/오류 0, 최종 전체 헤드리스 **698개 통과** (`work/regression-diagnostics.log`). 기존 시세·검색·배치·고정·선택·회색/불투명 처리 회귀를 포함함. 실제 Mac 창 진단 집중 검사 **20개 통과** (`work/diagnostics-native.log`). Windows에서 이번 로그 기능의 실제 실행 검사는 수행하지 않음.
 - 동시 기록 400개 전체 보존, 5,000개 순간 기록과 크기 초과 기록의 누락 집계·종료 기록, 크기/파일 개수/기간에 따른 정리와 무관한 파일 보존, 쓰기 불가 경로에서도 정상 시세 수신을 확인함. 실제 폴링과 통제 HTTP 응답으로 503 실패→복구 및 개별 종목 누락→복구 기록과 다른 종목의 독립 갱신을 확인함. 429/Retry-After, 타임아웃, 잘못된 JSON, 정상 취소, 두 제공처의 기록 및 정상 응답 샘플링/오류 후 즉시 기록을 확인함. 최초 시세 3초 기한과 안내 동작도 유지됨.
 - 실제 Mac 시험 가격창을 `[로그 검증용]`으로 구분하고 NSWindow level을 강제로 해제한 뒤 자동 보정과 보정 전후 상태의 파일 기록을 확인함. 테스트는 임시 설정·로그 경로와 가상 시세를 사용함. 이번 변경은 소스와 개발 빌드에만 반영했으며 릴리즈·기존 루트 .app 교체는 수행하지 않음. 기능 적용 전의 실제 사용자 환경 장애 원인을 복원한 검사는 아님.
+
+# v2.2.5 Windows·Mac 릴리즈 검증 · 2026-11-12
+
+- [릴리즈 workflow](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/43042737929) 전체 성공. Windows x64·Mac arm64·Mac x64 전체 헤드리스 각 **698개**, 실제 창 검사는 Windows **487개**, 두 Mac 각 **480개** 통과. 20개 가격창의 100회 미수신/수신 반복, HTTP 실패 5회와 개별 종목 누락 2회의 복구에서 네이티브 고정 불일치·창 핸들 교체가 없었음.
+- Windows EXE 단독 실행과 두 Mac ZIP 압축 해제·아키텍처·서명·독립 실행을 통과함. 세 배포 앱 모두 실행 시 기본 로그 경로에 버전이 포함된 `session.started` 기록이 생성됨을 확인함.
+- [v2.2.5 정식 릴리즈](https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v2.2.5) 게시 완료. 태그와 릴리즈 대상 커밋은 모두 `5161dc9a8c023ed06867acce20b1437cdb35a2e2`. 게시된 EXE·두 ZIP을 다시 내려받아 크기·GitHub digest·SHA256SUMS 일치, Windows PE x64와 두 Mac 앱 버전/CPU를 확인함. 파일은 `outputs/v2.2.5`에 보관함. 기존 로컬 .app은 교체·실행하지 않음.
+- SHA-256 Windows: `6dcdd83175746264027971e819f9f75d2eedddf1180037aa06f8ece43c0dcd49`; Mac arm64: `ff30b9ec347adedb4f9cd25a78997ac6a25f8ae9f70f367047816d344806743f`; Mac x64: `7585ed8f3f728760b89cb90cf1185c6a4e4150c338f2087861eedc726debd3cb`.
