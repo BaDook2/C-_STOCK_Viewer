@@ -160,3 +160,5 @@
 - 실제 Mac 창을 띄워 10ms 간격 및 창 크기·고정 속성 변경 시 NSWindow level을 관찰함. 활성화한 일반 창보다 고정 창이 실제로 위에 있는지도 orderedIndex로 검사함. 100회 반복 중 네이티브 topmost 해제는 0회였음.
 - 실제 PublicMarketData와 Avalonia 이벤트 전달을 사용하고 HTTP 응답만 통제하여 전체 요청 실패→복구 5회, 개별 종목 누락→복구 2회를 검사함. 검색창을 숨긴 상태에서도 원래 가격창과 네이티브 고정을 유지함. 외부 제공처에 오류를 유발하는 요청은 보내지 않았음.
 - Release 빌드 경고 0/오류 0, Mac 대상 검사 218개 통과. 앱 동작 코드는 변경하지 않고 회귀 검사만 추가함. 새 릴리즈는 게시하지 않음.
+- 첫 [플랫폼 검증](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42992658474)에서 두 Mac은 전체 통과했고, Windows도 고정 창의 네이티브 해제는 0회였음. 다만 사용자가 중간에 해제한 창이 다시 네이티브 topmost가 되는 별개 불일치를 발견함. IsFixed·Topmost는 false이고 실제 WS_EX_TOPMOST만 true였음.
+- Free 창의 원치 않는 Windows topmost 승격도 WndProc에서 차단하고, 모든 열린 가격창의 네이티브 고정·해제 양쪽 상태를 보정하도록 수정함. 정상 창은 재정렬·활성화하지 않음. 반복 검사에서 Free 상태도 10ms 관찰 대상으로 포함하고 의도하지 않은 네이티브 승격의 차단·복구 회귀를 추가함. 검증 workflow에 집중 검사 선택을 추가했으며 릴리즈 manifest는 변경하지 않음.

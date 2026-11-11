@@ -2,6 +2,12 @@ name: Verify desktop apps without publishing
 
 'on':
   workflow_dispatch:
+    inputs:
+      checks:
+        description: 'Full verification or the focused topmost feed-recovery checks'
+        default: full
+        type: choice
+        options: [full, topmost]
 
 permissions:
   contents: read
@@ -38,14 +44,22 @@ jobs:
         run: |
           dotnet build StockViewer.slnx -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
-          dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll
+          if ('${{ inputs.checks }}' -eq 'topmost') {
+            dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --topmost-flap-only
+          } else {
+            dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Regression checks failed.' }
       - name: Verify real native popup handles
         run: |
-          dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --native --ui-only
+          if ('${{ inputs.checks }}' -eq 'topmost') {
+            dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --native --topmost-flap-only
+          } else {
+            dotnet StockViewer.Tests/bin/Release/net10.0/StockViewer.Tests.dll --native --ui-only
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Native window checks failed.' }
       - name: Verify packaged Mac desktop observer
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.checks != 'topmost'
         env:
           RELEASE_RUNTIME: ${{ matrix.runtime }}
         run: |

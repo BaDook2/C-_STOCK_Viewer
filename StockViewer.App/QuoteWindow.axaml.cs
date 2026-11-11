@@ -283,6 +283,15 @@ public partial class QuoteWindow : Window
                 // never demote one pinned quote while another stays topmost.
                 if ((position.Flags & 0x0004) == 0) position.InsertAfter = new(-1);
             }
+            else if (PopupTopmost.ReadWindowsTopmost(hwnd) || (position.Flags & 0x0004) == 0
+                && (position.InsertAfter == new IntPtr(-1) || position.InsertAfter.ToInt64() > 1 && PopupTopmost.ReadWindowsTopmost(position.InsertAfter)))
+            {
+                // Windows can promote a normal window when it is reordered
+                // relative to a topmost sibling. Respect the user's Free state.
+                position.Flags &= ~0x0004u;
+                position.Flags |= 0x0200;
+                position.InsertAfter = new(-2);
+            }
             if ((position.Flags & 0x0001) == 0) position.Height = (int)Math.Round(32 * RenderScaling);
             Marshal.StructureToPtr(position, lParam, false); handled = true;
         }

@@ -35,14 +35,14 @@ internal static partial class Program
         var probe = new Window { Title = "StockViewer topmost test", Width = 200, Height = 100,
             WindowStartupLocation = WindowStartupLocation.Manual, Position = new(180, 190), ShowInTaskbar = false };
         var quotes = new List<QuoteWindow>();
-        var nativeChecks = 0; var nativeLosses = new List<string>(); var phase = "initial";
+        var nativeChecks = 0; var nativeLosses = new List<string>(); var phase = "initial"; var freeAudit = false;
         void Observe()
         {
             if (!native || !(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())) return;
-            foreach (var quote in quotes.Where(q => q.IsVisible && q.IsFixed))
+            foreach (var quote in quotes.Where(q => q.IsVisible && (q.IsFixed || freeAudit)))
             {
                 var pinned = PopupTopmost.Read(quote); nativeChecks++;
-                if (pinned != true && nativeLosses.Count < 20) nativeLosses.Add(phase + ": " + quote.Stock.Code + " native=" + pinned);
+                if (pinned != quote.IsFixed && nativeLosses.Count < 20) nativeLosses.Add(phase + ": " + quote.Stock.Code + " desired=" + quote.IsFixed + " native=" + pinned);
             }
         }
         void Changed(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -62,7 +62,7 @@ internal static partial class Program
             probe.Show(); probe.Activate(); await Idle(); Observe(); monitor.Start();
             for (var cycle = 0; cycle < 100; cycle++)
             {
-                if (cycle == 50) quotes[^1].SetFixed(false);
+                if (cycle == 50) { quotes[^1].SetFixed(false); freeAudit = true; }
                 if (cycle % 25 == 0) Application.Current!.RequestedThemeVariant = cycle % 50 == 0 ? ThemeVariant.Light : ThemeVariant.Dark;
                 phase = "missing " + cycle;
                 foreach (var quote in quotes) feed.Connection(new("가격 데이터 미수신 · 마지막 가격 유지", Code: quote.Stock.Code));
@@ -92,6 +92,14 @@ internal static partial class Program
                 Check(quotes.Take(19).All(q => IsAboveNormalProbe(q, probe)), "all nineteen pinned prices remain above an activated normal application window");
                 Check(PopupTopmost.Read(quotes[^1]) == false, "feed recovery never re-pins the one window deliberately unpinned by the user");
                 Console.WriteLine($"Topmost flap stress: 20 windows; 100 cycles; 4,000 connection transitions; {nativeChecks} native observations; {nativeLosses.Count} drops.");
+                monitor.Stop();
+                var free = quotes[^1]; var handle = free.TryGetPlatformHandle()!;
+                if (OperatingSystem.IsWindows()) SetWindowPos(handle.Handle, new(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                else ObjcSetLevel(handle.HandleDescriptor == "NSView" ? ObjcSend(handle.Handle, ObjcSelector("window")) : handle.Handle,
+                    ObjcSelector("setLevel:"), 3);
+                await Until(() => PopupTopmost.Read(free) == false);
+                Check(quotes.Take(19).All(q => PopupTopmost.Read(q) == true),
+                    "an unwanted native promotion of a Free window is blocked or repaired without demoting the nineteen pinned prices");
             }
         }
         finally
