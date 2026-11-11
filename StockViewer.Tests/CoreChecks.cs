@@ -111,8 +111,8 @@ internal static partial class Program
             && results.All(s => !s.Name.StartsWith("invalid")), "US ETFs and share classes use provider IDs; malformed and unsupported markets are ignored");
         var first = await service.GetSnapshotAsync("005930");
         var repeated = await service.GetSnapshotAsync("005930");
-        Check(first.Price == 72500 && first.ChangePercent == -1.25m, "public price and direction parse correctly");
-        Check(first.SourceTime.HasValue && first.MarketStatus == "CLOSE" && first.Source.Contains("네이버"), "public source timestamp and closed market retained");
+        Check(first.Price == 72500 && Math.Abs(first.ChangePercent + 1.25m) < .000001m, "Toss domestic price and previous-close return parse correctly");
+        Check(first.SourceTime.HasValue && first.MarketStatus == "CLOSE" && first.Source.Contains("토스"), "Toss domestic source timestamp and closed market retained");
         Check(handler.QuoteRequests == 1 && repeated == first, "initial lookup and repeated popup share cached quote");
         Check(!handler.HadAuthorization, "public requests send no authorization or broker key");
         Check(PublicMarketData.DefaultInterval == TimeSpan.FromSeconds(1), "fast polling targets one second");
@@ -133,9 +133,9 @@ internal static partial class Program
         await polling.SetSubscriptionsAsync([]);
         var count = pollingHandler.QuoteRequests; await Task.Delay(100);
         Check(pollingHandler.QuoteRequests == count, "last popup stops public polling");
-        var slowHandler = new PublicHttpFixture { Interval = 70000 };
+        var slowHandler = new PublicHttpFixture { UsInterval = 70000 };
         await using var slow = new PublicMarketData(slowHandler);
-        await slow.GetSnapshotAsync("005930"); await slow.GetSnapshotAsync("005930");
+        await slow.GetSnapshotAsync("US:AAPL.O"); await slow.GetSnapshotAsync("US:AAPL.O");
         Check(slow.PollingInterval.TotalSeconds == 1 && slow.ProviderPollingInterval.TotalSeconds == 70 && slowHandler.QuoteRequests == 1,
             "closed-market hints do not delay the target cadence and duplicate snapshots still share cache");
         var limitedHandler = new PublicHttpFixture { RateLimited = true };
@@ -296,7 +296,15 @@ internal static partial class Program
         var results = await service.SearchAsync("삼성", limit.Token);
         Check(results.Any(s => s.Code == "005930"), "live public autocomplete works without a key");
         var quote = await service.GetSnapshotAsync("005930", limit.Token);
-        Check(quote.Price > 0 && quote.SourceTime.HasValue, "live public quote has price and provider timestamp");
+        Check(quote.Price > 0 && quote.SourceTime.HasValue && quote.Source.Contains("토스"), "live domestic quote uses Toss with a real price and provider timestamp");
+        Console.WriteLine($"Domestic smoke: 005930; {quote.Price}; {quote.Source}; {quote.MarketStatus}; source {quote.SourceTime:O}; received {quote.ReceivedAt:O}.");
+        foreach (var code in new[] { "000660", "069500" })
+        {
+            var domestic = await service.GetSnapshotAsync(code, limit.Token);
+            Check(domestic.Price > 0 && domestic.Currency == "KRW" && domestic.Source.Contains("토스") && domestic.SourceTime.HasValue,
+                $"live Toss domestic stock or ETF needs no credentials: {code}");
+            Console.WriteLine($"Domestic smoke: {code}; {domestic.Price}; {domestic.Source}; {domestic.MarketStatus}; source {domestic.SourceTime:O}.");
+        }
         Check(service.PollingInterval == TimeSpan.FromSeconds(1), "live requests use the one-second target");
         var english = await service.SearchAsync("AAPL", limit.Token);
         var korean = await service.SearchAsync("애플", limit.Token);
@@ -321,6 +329,27 @@ internal static partial class Program
             Check(samples.Length == 3 && samples[2].ReceivedAt > samples[0].ReceivedAt, $"live background polling repeatedly receives {code}");
             Console.WriteLine($"Live cadence {code}: {(samples[2].ReceivedAt - samples[0].ReceivedAt).TotalSeconds / 2:0.000}s average; source {samples[2].SourceTime:O}; received {samples[2].ReceivedAt:O}.");
         }
+    }
+    private static async Task LiveDomesticWorkspaceSmoke()
+    {
+        await using var service = new PublicMarketData();
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var catalog = await service.GetStocksAsync(limit.Token);
+        var stocks = catalog.Where(s => StockCode.IsDomestic(s.Code)).Take(20).ToArray();
+        Check(stocks.Length == 20, "the live domestic catalog supplies twenty test stocks");
+        var main = MakeMain();
+        try
+        {
+            await main.UseServiceAsync(service, stocks);
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            var windows = await Task.WhenAll(stocks.Select(main.OpenStockAsync)).WaitAsync(limit.Token);
+            Console.WriteLine($"Live workspace result: {main.Popups.Count}/20; {elapsed.Elapsed.TotalSeconds:0.000}s; missing {string.Join(',', stocks.Where(s => !main.Popups.ContainsKey(s.Code)).Select(s => s.Code))}; delay notice {main.DataDelayNotice is not null}.");
+            Check(windows.All(w => w is { IsVisible: true, LastQuote.Price: > 0 } && w.LastQuote.Source.Contains("토스"))
+                && main.Popups.Count == 20 && main.DataDelayNotice is null,
+                "twenty real price windows receive Toss domestic quotes before their first-price deadline without placeholders or a delay popup");
+            Console.WriteLine($"Live domestic workspace: {main.Popups.Count} windows; {elapsed.Elapsed.TotalSeconds:0.000}s; all Toss; no credentials.");
+        }
+        finally { main.Close(); await Idle(); }
     }
     private sealed class PublicHttpFixture : HttpMessageHandler
     {
@@ -355,7 +384,17 @@ internal static partial class Program
                     new { code = "AAPL", name = "invalid provider ID", typeCode = "NASDAQ", nationCode = "USA", reutersCode = "AAPL.O/other" } } };
             else if (uri.Host == "m.stock.naver.com")
                 body = new { stocks = new[] { new { itemCode = uri.AbsolutePath.Contains("KOSDAQ") ? "196170" : "005930", stockName = "검색 종목" } } };
-            else if (uri.Host == "polling.finance.naver.com")
+            else if (uri.AbsolutePath == "/api/v3/init") body = new { result = new { } };
+            else if (uri.AbsolutePath == "/api/v2/system/trading-hours/integrated")
+                body = new { result = new { ats = DomesticCalendar(DateTimeOffset.UtcNow, holiday: true) } };
+            else if (uri.AbsolutePath.StartsWith("/api/v2/stock-infos/code-or-symbol/"))
+            {
+                var symbol = uri.Segments.Last();
+                body = new { result = new { code = "TOSS" + symbol, symbol, currency = "KRW", market = new { code = "KSP" }, nxtSupported = false } };
+            }
+            else if (uri.AbsolutePath.StartsWith("/api/v1/mds/info/krx-extended-hour-support-yn/"))
+                body = new { result = new { shortCode = uri.Segments.Last(), date = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(9)).ToString("yyyy-MM-dd"), afterMarketPossYn = false } };
+            else if (uri.Host == "polling.finance.naver.com" || uri.AbsolutePath == "/api/v5/stock-prices")
             {
                 var requestNumber = Interlocked.Increment(ref QuoteRequests);
                 RequestTimes.Enqueue(DateTimeOffset.UtcNow); RequestedPaths.Enqueue(uri.AbsolutePath);
@@ -373,7 +412,9 @@ internal static partial class Program
                     if (HoldUs is { } hold) await hold.Task.WaitAsync(cancellation);
                 }
                 if (!us && FailDomestic) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
-                var codes = Uri.UnescapeDataString(uri.Segments.Last()).Split(','); LastBatchSize = codes.Length;
+                var codes = us ? Uri.UnescapeDataString(uri.Segments.Last()).Split(',')
+                    : Uri.UnescapeDataString(uri.Query.TrimStart('?').Split('&').Single(p => p.StartsWith("productCodes="))[13..]).Split(',').Select(c => c[4..]).ToArray();
+                LastBatchSize = codes.Length;
                 if (us) UsBatchSizes.Enqueue(codes.Length); else DomesticBatches.Enqueue(codes);
                 var price = ChangingPrices ? ((us ? 123.45m : 72500m) + requestNumber).ToString(System.Globalization.CultureInfo.InvariantCulture) : us ? "123.45" : "72,500";
                 body = new { pollingInterval = MalformedInterval ? (object)"bad" : us ? UsInterval : Interval, datas = codes.Where(code => code != MissingCode).Select(code => new {
@@ -381,6 +422,13 @@ internal static partial class Program
                     fluctuationsRatio = "1.25", compareToPreviousPrice = new { code = "5" },
                     stockExchangeType = new { name = us ? "NASDAQ" : "KRX", delayTime = 0 }, currencyType = new { code = us ? "USD" : "KRW" },
                     localTradedAt = "2026-10-30T15:30:00+09:00", marketStatus = "CLOSE" }).ToArray() };
+                if (!us)
+                {
+                    var domesticPrice = ChangingPrices ? 72500m + requestNumber : 72500m;
+                    body = new { result = new { prices = codes.Where(code => code != MissingCode).Select(code => new {
+                        productCode = "TOSS" + code, marketCurrency = "KRW", exchange = "krx", close = domesticPrice,
+                        @base = domesticPrice / .9875m, dt = "2026-10-30T15:30:00+09:00" }).ToArray() } };
+                }
             }
             else throw new Exception("Unexpected public host.");
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };

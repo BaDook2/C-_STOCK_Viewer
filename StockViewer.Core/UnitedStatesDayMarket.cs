@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Net;
-using System.Text;
 using System.Text.Json;
 
 namespace StockViewer.Core;
@@ -11,29 +9,21 @@ public sealed record DayMarketBatch(IReadOnlyDictionary<string, Quote> Quotes, I
 /// <summary>Read-only public Toss US daytime quotes using a fresh anonymous session.</summary>
 public sealed class UnitedStatesDayMarket : IDisposable
 {
-    private const string Api = "https://wts-api.tossinvest.com";
-    private const string Info = "https://wts-info-api.tossinvest.com";
-    private readonly HttpClient http;
-    private readonly CookieContainer cookies = new();
-    private readonly string tabId = Guid.NewGuid().ToString();
+    private const string Api = TossPublicSession.Api;
+    private const string Info = TossPublicSession.Info;
+    private readonly TossPublicSession session;
     private readonly TimeProvider clock;
     private readonly ConcurrentDictionary<string, string> symbols = new();
     private readonly Dictionary<string, Product> products = [];
     private readonly SemaphoreSlim gate = new(1, 1);
     private JsonElement calendar;
-    private DateTimeOffset calendarExpires, blockedUntil;
-    private bool initialized;
+    private DateTimeOffset calendarExpires;
     private sealed record Product(string? Code, bool Supported, DateTimeOffset Expires);
 
     public UnitedStatesDayMarket(HttpMessageHandler? handler = null, TimeProvider? clock = null)
     {
         this.clock = clock ?? TimeProvider.System;
-        cookies.Add(new Cookie("deviceId", "WTS-" + Guid.NewGuid().ToString("N"), "/", ".tossinvest.com") { Secure = true });
-        http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, CookieContainer = cookies })
-        { Timeout = TimeSpan.FromSeconds(5) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("StockViewer/2.0");
-        http.DefaultRequestHeaders.Add("browser-tab-id", tabId);
-        http.DefaultRequestHeaders.CacheControl = new() { NoCache = true };
+        session = new(handler, this.clock);
     }
 
     public void Register(Stock stock)
@@ -42,43 +32,9 @@ public sealed class UnitedStatesDayMarket : IDisposable
             symbols[stock.Code] = stock.Symbol;
     }
 
-    private async Task<JsonElement> SendAsync(string url, CancellationToken cancellation, string? body = null)
-    {
-        if (clock.GetUtcNow() < blockedUntil) throw new IOException("데이마켓 요청 제한 · 재시도 대기");
-        using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, url);
-        if (body is not null)
-        {
-            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-            if (cookies.GetCookies(new Uri(Info))["XSRF-TOKEN"] is { } csrf)
-                request.Headers.Add("X-XSRF-TOKEN", csrf.Value);
-        }
-        using var response = await http.SendAsync(request, cancellation).ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.TooManyRequests || !response.IsSuccessStatusCode && response.Headers.RetryAfter is not null)
-        {
-            var delay = response.Headers.RetryAfter?.Delta ?? response.Headers.RetryAfter?.Date - clock.GetUtcNow() ?? TimeSpan.FromSeconds(30);
-            if (delay <= TimeSpan.Zero) delay = TimeSpan.FromSeconds(30);
-            blockedUntil = clock.GetUtcNow() + delay;
-            throw new IOException("데이마켓 요청 제한 · 재시도 대기");
-        }
-        if (!response.IsSuccessStatusCode)
-        {
-            if (response.StatusCode == HttpStatusCode.BadRequest) initialized = false;
-            throw new IOException($"데이마켓 연결 실패 (HTTP {(int)response.StatusCode})");
-        }
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false));
-        if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("result", out var result))
-            throw new InvalidDataException("데이마켓 응답 형식 오류");
-        return result.Clone();
-    }
-
-    private async Task InitializeAsync(CancellationToken cancellation)
-    {
-        if (initialized) return;
-        // This is the website's public visitor initialization. No existing browser
-        // cookies, account IDs, login tickets or authentication APIs are used.
-        await SendAsync(Api + "/api/v3/init?tabId=" + tabId, cancellation).ConfigureAwait(false);
-        initialized = true;
-    }
+    private Task<JsonElement> SendAsync(string url, CancellationToken cancellation, string? body = null)
+        => session.SendAsync(url, cancellation, body);
+    private Task InitializeAsync(CancellationToken cancellation) => session.InitializeAsync(cancellation);
 
     public static bool IsDayMarketOpen(JsonElement usCalendar, DateTimeOffset now)
     {
@@ -201,5 +157,5 @@ public sealed class UnitedStatesDayMarket : IDisposable
         finally { gate.Release(); }
     }
 
-    public void Dispose() => http.Dispose();
+    public void Dispose() => session.Dispose();
 }

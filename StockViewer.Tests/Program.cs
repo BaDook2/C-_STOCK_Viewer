@@ -33,10 +33,11 @@ internal static partial class Program
             {
                 if (args.Contains("--pointer-only")) await PointerPipelineTests();
                 else if (args.Contains("--public-smoke")) await LivePublicSmoke();
+                else if (args.Contains("--domestic-workspace-smoke")) await LiveDomesticWorkspaceSmoke();
                 else
                 {
                     SettingsMigrationTests();
-                    if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await FastPollingTests(); }
+                    if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await TossDomesticTests(); await FastPollingTests(); }
                     await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await PopupLayoutTests(); await LayoutFeedbackTests(); await TaskbarPersistenceTests(); await MultipleTopmostTests(); await SelectionTests(); await GroupCloseTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
                     if (!native) await PointerPipelineTests();
                     if (native) await NativeWindowChecks();

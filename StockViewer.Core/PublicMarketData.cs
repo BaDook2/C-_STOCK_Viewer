@@ -9,6 +9,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
 {
     private readonly HttpClient http;
     private readonly UnitedStatesDayMarket? dayMarket;
+    private readonly TossDomesticMarket domesticFeed;
     private readonly CancellationTokenSource lifetime = new();
     private readonly MarketState domestic = new(false), unitedStates = new(true);
     private readonly object lifecycleGate = new();
@@ -22,10 +23,12 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
     public event Action<Quote>? QuoteReceived;
     public event Action<ConnectionStatus>? StatusChanged;
 
-    public PublicMarketData(HttpMessageHandler? handler = null, HttpMessageHandler? dayMarketHandler = null, TimeProvider? dayMarketClock = null)
+    public PublicMarketData(HttpMessageHandler? handler = null, HttpMessageHandler? dayMarketHandler = null, TimeProvider? dayMarketClock = null,
+        HttpMessageHandler? domesticHandler = null, TimeProvider? domesticClock = null)
     {
         // A supplied primary fixture remains isolated from the external network.
         if (handler is null || dayMarketHandler is not null) dayMarket = new(dayMarketHandler, dayMarketClock);
+        domesticFeed = new(domesticHandler ?? handler, domesticClock);
         http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(5) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("StockViewer/1.0");
         http.DefaultRequestHeaders.CacheControl = new() { NoCache = true };
@@ -212,6 +215,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         market.Failures[code] = failures;
         var delay = TimeSpan.FromSeconds(Math.Min(10, Math.Pow(2, failures - 1)));
         if (error is PublicRateLimitException limited && limited.RetryAfter > delay) delay = limited.RetryAfter;
+        if (error is TossRateLimitException tossLimited && tossLimited.RetryAfter > delay) delay = tossLimited.RetryAfter;
         market.NextFetch[code] = DateTimeOffset.UtcNow + delay;
         Report(market, code, new($"시세 조회 지연 · 마지막 가격 유지 · {delay.TotalSeconds:0.#}초 후 재시도", Code: code));
     }
@@ -224,19 +228,28 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
             var startedAt = DateTimeOffset.UtcNow;
             var quotes = new Dictionary<string, Quote>();
             Exception? primaryError = null;
+            IReadOnlyDictionary<string, Exception>? domesticErrors = null;
             try
             {
-                var path = market.UnitedStates ? "worldstock" : "domestic";
-                var providerCodes = batch.Select(c => Uri.EscapeDataString(StockCode.ProviderCode(c)));
-                var root = await GetJsonAsync($"https://polling.finance.naver.com/api/realtime/{path}/stock/" + string.Join(',', providerCodes), cancellation).ConfigureAwait(false);
-                Interlocked.Exchange(ref providerIntervalTicks, ReadPollingInterval(root).Ticks);
-                foreach (var quote in ParseQuotes(root, market.UnitedStates).Where(q => batch.Contains(q.Code))) quotes[quote.Code] = quote;
-                if (market.UnitedStates && root.TryGetProperty("datas", out var rows))
-                    foreach (var row in rows.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object))
-                    {
-                        var code = "US:" + KiwoomParser.Text(row, "reutersCode");
-                        if (batch.Contains(code)) dayMarket?.Register(new(code, KiwoomParser.Text(row, "stockName"), "USA", KiwoomParser.Text(row, "symbolCode")));
-                    }
+                if (!market.UnitedStates)
+                {
+                    var domesticBatch = await domesticFeed.GetQuotesAsync(batch, cancellation).ConfigureAwait(false);
+                    foreach (var (code, quote) in domesticBatch.Quotes) quotes[code] = quote;
+                    domesticErrors = domesticBatch.Errors;
+                }
+                else
+                {
+                    var providerCodes = batch.Select(c => Uri.EscapeDataString(StockCode.ProviderCode(c)));
+                    var root = await GetJsonAsync("https://polling.finance.naver.com/api/realtime/worldstock/stock/" + string.Join(',', providerCodes), cancellation).ConfigureAwait(false);
+                    Interlocked.Exchange(ref providerIntervalTicks, ReadPollingInterval(root).Ticks);
+                    foreach (var quote in ParseQuotes(root, market.UnitedStates).Where(q => batch.Contains(q.Code))) quotes[quote.Code] = quote;
+                    if (root.TryGetProperty("datas", out var rows))
+                        foreach (var row in rows.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object))
+                        {
+                            var code = "US:" + KiwoomParser.Text(row, "reutersCode");
+                            if (batch.Contains(code)) dayMarket?.Register(new(code, KiwoomParser.Text(row, "stockName"), "USA", KiwoomParser.Text(row, "symbolCode")));
+                        }
+                }
             }
             catch (Exception ex) when (!cancellation.IsCancellationRequested
                 && ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
@@ -268,10 +281,10 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                 }
                 if (quote is null)
                 {
-                    Failed(market, code, primaryError ?? new InvalidDataException("해당 종목의 공개 시세가 제공되지 않습니다."));
+                    Failed(market, code, domesticErrors?.GetValueOrDefault(code) ?? primaryError ?? new InvalidDataException("해당 종목의 공개 시세가 제공되지 않습니다."));
                     continue;
                 }
-                var uncertain = (dayFailed || daytime?.UnknownCodes.Contains(code) == true) && quote.MarketStatus != "OPEN";
+                var uncertain = quote.MarketStatus == "UNKNOWN" || (dayFailed || daytime?.UnknownCodes.Contains(code) == true) && quote.MarketStatus != "OPEN";
                 if (uncertain) quote = quote with { MarketStatus = "UNKNOWN" };
                 // Keep the last daytime trade after its session ends, until another
                 // venue supplies a newer trade. Session status can still change.
@@ -282,8 +295,8 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                 market.Errors.Remove(code); market.Failures.Remove(code);
                 if (Volatile.Read(ref market.Subscriptions).Contains(code)) QuoteReceived?.Invoke(quote);
                 Report(market, code, uncertain
-                    ? new("데이마켓 확인 지연 · 마지막 가격 유지 · 재시도 중", Code: code)
-                    : new("공개 시세 연결 · 1초 목표", true, Code: code));
+                    ? new(market.UnitedStates ? "데이마켓 확인 지연 · 마지막 가격 유지 · 재시도 중" : "거래시간 확인 지연 · 시세 수신 중", Code: code)
+                    : new((market.UnitedStates ? "공개 시세" : "토스 국내 통합 시세") + " 연결 · 1초 목표", true, Code: code));
             }
         }
     }
@@ -296,7 +309,13 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         await market.Gate.WaitAsync(linked.Token).ConfigureAwait(false);
         try
         {
-            await RefreshLockedAsync(market, [code], linked.Token).ConfigureAwait(false);
+            // Snapshot callers for a restored workspace queue behind this gate.
+            // Fetch the other due subscriptions in the same domestic batch so
+            // each caller need not wait for another pair of product lookups.
+            var snapshotCodes = market.UnitedStates ? [code] : new[] { code }.Concat(Volatile.Read(ref market.Subscriptions)
+                .Where(c => !market.NextFetch.TryGetValue(c, out var next) || next <= DateTimeOffset.UtcNow))
+                .Distinct().Take(20).ToArray();
+            await RefreshLockedAsync(market, snapshotCodes, linked.Token).ConfigureAwait(false);
             if (market.Statuses.TryGetValue(code, out var status)) Report(market, code, status, replay: true);
             if (market.Cache.TryGetValue(code, out var quote)) return quote;
             if (market.Errors.TryGetValue(code, out var error)) throw error;
@@ -365,7 +384,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         Task[] runners;
         lock (lifecycleGate) runners = new[] { domestic.Runner, unitedStates.Runner }.OfType<Task>().ToArray();
         await Task.WhenAll(runners).ConfigureAwait(false);
-        http.Dispose(); dayMarket?.Dispose(); lifetime.Dispose();
+        domesticFeed.Dispose(); http.Dispose(); dayMarket?.Dispose(); lifetime.Dispose();
     }
     private sealed class MarketState(bool unitedStates)
     {

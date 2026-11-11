@@ -125,30 +125,22 @@ internal static partial class Program
             "a valid US premarket trade can be used when the regular timestamp is missing");
     }
 
-    private sealed class SessionHttpFixture(string initialFrame) : HttpMessageHandler
-    {
-        public string Frame = initialFrame;
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Volatile.Read(ref Frame)) });
-    }
     private static async Task SessionPollingTests()
     {
-        var handler = new SessionHttpFixture(DomesticSessionFrame().GetRawText());
-        await using var service = new PublicMarketData(handler);
+        var clock = new DayClock { Now = DateTimeOffset.Parse("2026-11-11T07:50:00+09:00") };
+        var handler = new DomesticHttpFixture(clock);
+        await using var service = new PublicMarketData(new PublicHttpFixture(), domesticHandler: handler, domesticClock: clock);
         Quote? latest = null; service.QuoteReceived += quote => Volatile.Write(ref latest, quote);
         await service.SetSubscriptionsAsync(["005930"]); service.Start();
         await Until(() => Volatile.Read(ref latest)?.MarketStatus == "CLOSE");
-        var extended = new { tradingSessionType = "AFTER_MARKET", overMarketStatus = "OPEN", overPrice = "10,200",
-            fluctuationsRatio = "2.00", localTradedAt = "2026-11-09T18:30:00+09:00" };
-        Volatile.Write(ref handler.Frame, DomesticSessionFrame(extended).GetRawText());
+        clock.Now = DateTimeOffset.Parse("2026-11-11T18:00:00+09:00");
         await Until(() => Volatile.Read(ref latest) is { Price: 10200, MarketStatus: "OPEN" });
-        Check(true, "polling continues from the regular close into Korean extended trading");
-        Volatile.Write(ref handler.Frame, DomesticSessionFrame(extended with { overMarketStatus = "CLOSE" }).GetRawText());
+        Check(true, "Toss polling resumes automatically in domestic extended trading");
+        clock.Now = DateTimeOffset.Parse("2026-11-11T20:00:00+09:00");
         await Until(() => Volatile.Read(ref latest) is { Price: 10200, MarketStatus: "CLOSE" });
-        Check(true, "polling delivers the extended close even when the trade price and timestamp do not change");
-        Volatile.Write(ref handler.Frame, DomesticSessionFrame(extended with { tradingSessionType = "PRE_MARKET",
-            localTradedAt = "2026-11-10T08:00:00+09:00" }).GetRawText());
-        await Until(() => Volatile.Read(ref latest) is { MarketStatus: "OPEN" } quote && quote.Source.Contains("프리마켓"));
-        Check(true, "a fully closed subscription resumes at the next premarket without reopening the popup");
+        Check(true, "Toss polling reports a full close without discarding the last price");
+        clock.Now = DateTimeOffset.Parse("2026-11-12T08:10:00+09:00");
+        await Until(() => Volatile.Read(ref latest)?.MarketStatus == "OPEN");
+        Check(true, "Toss NXT premarket automatically reopens the existing domestic popup");
     }
 }
