@@ -32,12 +32,14 @@ internal static partial class Program
             try
             {
                 if (args.Contains("--pointer-only")) await PointerPipelineTests();
+                else if (args.Contains("--diagnostics-only")) await DiagnosticTests();
                 else if (args.Contains("--topmost-flap-only")) await TopmostFeedFlapTests();
                 else if (args.Contains("--public-smoke")) await LivePublicSmoke();
                 else if (args.Contains("--domestic-workspace-smoke")) await LiveDomesticWorkspaceSmoke();
                 else
                 {
                     SettingsMigrationTests();
+                    await DiagnosticTests();
                     if (!args.Contains("--ui-only")) { await CoreTests(); await TransportTests(); await PublicDataTests(); ExtendedSessionTests(); await SessionPollingTests(); await UnitedStatesDataTests(); await DayMarketTests(); await TossDomesticTests(); await FastPollingTests(); }
                     await LoadingPopupTests(); await LoadingDeadlineTests(); await NativeCloseTests(); await PlacementTests(); await PopupLayoutTests(); await LayoutFeedbackTests(); await TaskbarPersistenceTests(); await MultipleTopmostTests(); await TopmostFeedFlapTests(); await SelectionTests(); await GroupCloseTests(); await ThemeAndSessionTests(); await UiTests(); await GestureTests(); await SearchTests(); await LifetimeTests();
                     if (!native) await PointerPipelineTests();

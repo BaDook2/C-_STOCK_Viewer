@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using StockViewer.Core;
 
 namespace StockViewer.Desktop;
 
@@ -16,7 +17,7 @@ internal static class PopupTopmost
     public static void Update(QuoteWindow window)
     {
         if (window.IsVisible) windows.Add(window); else windows.Remove(window);
-        Ensure(window, window.IsFixed);
+        Ensure(window, window.IsFixed, "state_update");
         if (windows.Count > 0) timer.Start(); else timer.Stop();
         QueueCheck();
     }
@@ -29,8 +30,8 @@ internal static class PopupTopmost
         Dispatcher.UIThread.Post(() => { queued = false; EnsureAll(); }, DispatcherPriority.Background);
     }
     private static void EnsureAll()
-    { foreach (var window in windows.ToArray()) if (window.IsVisible) Ensure(window, window.IsFixed); }
-    private static void Ensure(Window window, bool enabled)
+    { foreach (var window in windows.ToArray()) if (window.IsVisible) Ensure(window, window.IsFixed, "consistency_check"); }
+    private static void Ensure(QuoteWindow window, bool enabled, string trigger)
     {
         if (!window.IsVisible || Read(window) is not { } actual || actual == enabled) return;
         var handle = window.TryGetPlatformHandle()!;
@@ -38,6 +39,8 @@ internal static class PopupTopmost
             SetWindowPos(handle.Handle, enabled ? new(-1) : new(-2), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200);
         else if (OperatingSystem.IsMacOS())
             SendLevel(MacWindow(window), Selector("setLevel:"), enabled ? 3 : 0);
+        DiagnosticLog.Write("popup.topmost_repair", new { code = window.Stock.Code, popupId = window.DiagnosticId,
+            desired = enabled, nativeBefore = actual, nativeAfter = Read(window), trigger }, trigger == "consistency_check" ? "warning" : "info");
     }
     internal static bool? Read(Window window)
     {

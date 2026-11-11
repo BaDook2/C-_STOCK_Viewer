@@ -23,7 +23,7 @@ public sealed class UnitedStatesDayMarket : IDisposable
     public UnitedStatesDayMarket(HttpMessageHandler? handler = null, TimeProvider? clock = null)
     {
         this.clock = clock ?? TimeProvider.System;
-        session = new(handler, this.clock);
+        session = new(handler, this.clock, "toss.us_day");
     }
 
     public void Register(Stock stock)
@@ -87,6 +87,7 @@ public sealed class UnitedStatesDayMarket : IDisposable
                 || KiwoomParser.Text(info, "currency") != "USD") throw new InvalidDataException("데이마켓 종목 식별자가 일치하지 않습니다.");
             supported = info.TryGetProperty("daytimePriceSupported", out var daytime) && daytime.ValueKind == JsonValueKind.True;
         }
+        DiagnosticLog.Write("product.resolved", new { provider = "toss.us_day", symbol, found = productCode is not null, daytimeSupported = supported });
         return products[symbol] = new(productCode, supported, clock.GetUtcNow() + TimeSpan.FromMinutes(10));
     }
 
@@ -142,6 +143,7 @@ public sealed class UnitedStatesDayMarket : IDisposable
                 catch (Exception e) when (!cancellation.IsCancellationRequested
                     && e is IOException or InvalidDataException or HttpRequestException or JsonException or OperationCanceledException)
                 {
+                    DiagnosticLog.Write("metadata.unavailable", new { provider = "toss.us_day", code, operation = "product", error = DiagnosticLog.Error(e) }, "warning");
                     unknown.Add(code);
                     products[symbol] = new(null, false, clock.GetUtcNow() + TimeSpan.FromSeconds(5));
                 }

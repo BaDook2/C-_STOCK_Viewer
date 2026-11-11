@@ -38,30 +38,40 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
     { foreach (var stock in stocks) dayMarket?.Register(stock); }
     private async Task<JsonElement> GetJsonAsync(string uri, CancellationToken cancellation)
     {
-        var blockedUntil = Interlocked.Read(ref retryAfterTicks);
-        if (DateTimeOffset.UtcNow.UtcTicks < blockedUntil)
-            throw new PublicRateLimitException(TimeSpan.FromTicks(blockedUntil - DateTimeOffset.UtcNow.UtcTicks));
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, lifetime.Token);
-        using var response = await http.GetAsync(uri, linked.Token).ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.TooManyRequests
-            || !response.IsSuccessStatusCode && response.Headers.RetryAfter is not null)
+        using var trace = DiagnosticLog.Request("naver", uri);
+        try
         {
-            var delay = response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow) ?? TimeSpan.FromSeconds(30);
-            if (delay <= TimeSpan.Zero) delay = TimeSpan.FromSeconds(30);
-            var until = (DateTimeOffset.UtcNow + delay).UtcTicks;
-            var previous = Interlocked.Read(ref retryAfterTicks);
-            while (previous < until)
+            var blockedUntil = Interlocked.Read(ref retryAfterTicks);
+            if (DateTimeOffset.UtcNow.UtcTicks < blockedUntil)
             {
-                var observed = Interlocked.CompareExchange(ref retryAfterTicks, until, previous);
-                if (observed == previous) break;
-                previous = observed;
+                var remaining = TimeSpan.FromTicks(Math.Max(0, blockedUntil - DateTimeOffset.UtcNow.UtcTicks));
+                trace.RetryAfter(remaining); throw new PublicRateLimitException(remaining);
             }
-            throw new PublicRateLimitException(delay);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, lifetime.Token);
+            using var response = await http.GetAsync(uri, linked.Token).ConfigureAwait(false);
+            trace.Response(response.StatusCode);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests
+                || !response.IsSuccessStatusCode && response.Headers.RetryAfter is not null)
+            {
+                var delay = response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow) ?? TimeSpan.FromSeconds(30);
+                if (delay <= TimeSpan.Zero) delay = TimeSpan.FromSeconds(30);
+                trace.RetryAfter(delay);
+                var until = (DateTimeOffset.UtcNow + delay).UtcTicks;
+                var previous = Interlocked.Read(ref retryAfterTicks);
+                while (previous < until)
+                {
+                    var observed = Interlocked.CompareExchange(ref retryAfterTicks, until, previous);
+                    if (observed == previous) break;
+                    previous = observed;
+                }
+                throw new PublicRateLimitException(delay);
+            }
+            if (!response.IsSuccessStatusCode) throw new IOException($"공개 시세 연결 실패 (HTTP {(int)response.StatusCode})");
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false));
+            if (document.RootElement.ValueKind != JsonValueKind.Object) throw new InvalidDataException("공개 데이터 응답이 올바르지 않습니다.");
+            return document.RootElement.Clone();
         }
-        if (!response.IsSuccessStatusCode) throw new IOException($"공개 시세 연결 실패 (HTTP {(int)response.StatusCode})");
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false));
-        if (document.RootElement.ValueKind != JsonValueKind.Object) throw new InvalidDataException("공개 데이터 응답이 올바르지 않습니다.");
-        return document.RootElement.Clone();
+        catch (Exception e) { trace.Fail(e, cancellation.IsCancellationRequested || lifetime.IsCancellationRequested); throw; }
     }
     public async Task<IReadOnlyList<Stock>> GetStocksAsync(CancellationToken cancellation = default)
     {
@@ -205,18 +215,24 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
     private void Report(MarketState market, string code, ConnectionStatus status, bool replay = false)
     {
         var changed = !market.Statuses.TryGetValue(code, out var previous) || previous != status;
+        if (changed) DiagnosticLog.Write("quote.status", new { code, status.Connected, status.Message });
         market.Statuses[code] = status;
         if ((changed || replay) && Volatile.Read(ref market.Subscriptions).Contains(code)) StatusChanged?.Invoke(status);
     }
     private void Failed(MarketState market, string code, Exception error)
     {
         market.Errors[code] = error;
-        var failures = market.Failures.TryGetValue(code, out var count) ? Math.Min(count + 1, 5) : 1;
+        if (!market.FailureSince.ContainsKey(code)) market.FailureSince[code] = DateTimeOffset.UtcNow;
+        var failures = market.Failures.TryGetValue(code, out var count) ? count < int.MaxValue ? count + 1 : count : 1;
         market.Failures[code] = failures;
-        var delay = TimeSpan.FromSeconds(Math.Min(10, Math.Pow(2, failures - 1)));
+        var delay = TimeSpan.FromSeconds(Math.Min(10, Math.Pow(2, Math.Min(failures - 1, 4))));
         if (error is PublicRateLimitException limited && limited.RetryAfter > delay) delay = limited.RetryAfter;
         if (error is TossRateLimitException tossLimited && tossLimited.RetryAfter > delay) delay = tossLimited.RetryAfter;
         market.NextFetch[code] = DateTimeOffset.UtcNow + delay;
+        DiagnosticLog.Write("quote.unavailable", new { code, market = market.UnitedStates ? "US" : "KR", consecutiveFailures = failures,
+            retryAfterSeconds = delay.TotalSeconds, lastReceivedAt = market.Cache.GetValueOrDefault(code)?.ReceivedAt,
+            failureSince = market.FailureSince[code],
+            error = DiagnosticLog.Error(error) }, "warning");
         Report(market, code, new($"시세 조회 지연 · 마지막 가격 유지 · {delay.TotalSeconds:0.#}초 후 재시도", Code: code));
     }
     private async Task RefreshLockedAsync(MarketState market, IEnumerable<string> codes, CancellationToken cancellation)
@@ -258,10 +274,19 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
             var dayFailed = false;
             if (market.UnitedStates && dayMarket is not null)
             {
-                try { daytime = await dayMarket.GetQuotesAsync(batch, cancellation).ConfigureAwait(false); }
+                try
+                {
+                    daytime = await dayMarket.GetQuotesAsync(batch, cancellation).ConfigureAwait(false);
+                    var missing = daytime.OpenCodes.Except(daytime.Quotes.Keys).ToArray();
+                    if (missing.Length > 0) DiagnosticLog.Write("feed.partial", new { provider = "toss.us_day", codes = missing,
+                        reason = "missing_or_invalid_price" }, "warning");
+                }
                 catch (Exception ex) when (!cancellation.IsCancellationRequested
                     && ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
-                { dayFailed = true; }
+                {
+                    DiagnosticLog.Write("feed.supplement_failed", new { provider = "toss.us_day", codes = batch, error = DiagnosticLog.Error(ex) }, "warning");
+                    dayFailed = true;
+                }
             }
             var next = startedAt + DefaultInterval;
             var earliest = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(50);
@@ -281,6 +306,9 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                 }
                 if (quote is null)
                 {
+                    if (primaryError is null && domesticErrors?.ContainsKey(code) != true)
+                        DiagnosticLog.Write("quote.missing", new { code, provider = market.UnitedStates ? "naver/toss.us_day" : "toss.domestic",
+                            reason = "missing_or_invalid_price" }, "warning");
                     Failed(market, code, domesticErrors?.GetValueOrDefault(code) ?? primaryError ?? new InvalidDataException("해당 종목의 공개 시세가 제공되지 않습니다."));
                     continue;
                 }
@@ -292,7 +320,17 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
                     && quote.SourceTime is { } currentTime && currentTime < previousTime)
                     quote = previous with { ReceivedAt = quote.ReceivedAt, MarketStatus = quote.MarketStatus };
                 market.Cache[code] = quote; market.NextFetch[code] = next;
+                if (market.Failures.TryGetValue(code, out var recoveredFailures))
+                    DiagnosticLog.Write("quote.recovered", new { code, consecutiveFailures = recoveredFailures,
+                        unavailableMs = Math.Round((DateTimeOffset.UtcNow - market.FailureSince[code]).TotalMilliseconds), quote.Source, quote.SourceTime, quote.ReceivedAt });
+                if (!market.Diagnostics.TryGetValue(code, out var lastDiagnostic) || now - lastDiagnostic.At >= TimeSpan.FromMinutes(1)
+                    || lastDiagnostic.Source != quote.Source || lastDiagnostic.Status != quote.MarketStatus)
+                {
+                    DiagnosticLog.Write("quote.received", new { code, quote.Source, quote.SourceTime, quote.ReceivedAt, quote.MarketStatus });
+                    market.Diagnostics[code] = (now, quote.Source, quote.MarketStatus);
+                }
                 market.Errors.Remove(code); market.Failures.Remove(code);
+                market.FailureSince.Remove(code);
                 if (Volatile.Read(ref market.Subscriptions).Contains(code)) QuoteReceived?.Invoke(quote);
                 Report(market, code, uncertain
                     ? new(market.UnitedStates ? "데이마켓 확인 지연 · 마지막 가격 유지 · 재시도 중" : "거래시간 확인 지연 · 시세 수신 중", Code: code)
@@ -330,6 +368,8 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         var items = codes.Distinct().Order().ToArray();
         if (items.Any(c => !StockCode.IsValid(c))) throw new ArgumentException("잘못된 종목코드입니다.");
         if (items.Length > 200) throw new InvalidOperationException("최대 200종목까지 표시할 수 있습니다.");
+        if (!items.SequenceEqual(Volatile.Read(ref domestic.Subscriptions).Concat(Volatile.Read(ref unitedStates.Subscriptions)).Order()))
+            DiagnosticLog.Write("feed.subscriptions", new { codes = items });
         foreach (var market in new[] { domestic, unitedStates })
         {
             Volatile.Write(ref market.Subscriptions, items.Where(c => StockCode.IsUnitedStates(c) == market.UnitedStates).ToArray());
@@ -368,6 +408,7 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { break; }
             catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
             {
+                DiagnosticLog.Write("feed.loop_failed", new { market = market.UnitedStates ? "US" : "KR", error = DiagnosticLog.Error(ex) }, "warning");
                 delay = DefaultInterval;
                 if (ex is PublicRateLimitException limited && limited.RetryAfter > delay) delay = limited.RetryAfter;
                 foreach (var code in Volatile.Read(ref market.Subscriptions))
@@ -394,8 +435,10 @@ public sealed class PublicMarketData : IMarketDataService, IStockSearchService
         public Dictionary<string, Quote> Cache { get; } = [];
         public Dictionary<string, DateTimeOffset> NextFetch { get; } = [];
         public Dictionary<string, int> Failures { get; } = [];
+        public Dictionary<string, DateTimeOffset> FailureSince { get; } = [];
         public Dictionary<string, Exception> Errors { get; } = [];
         public Dictionary<string, ConnectionStatus> Statuses { get; } = [];
+        public Dictionary<string, (DateTimeOffset At, string Source, string? Status)> Diagnostics { get; } = [];
         public string[] Subscriptions = [];
         public Task? Runner;
     }

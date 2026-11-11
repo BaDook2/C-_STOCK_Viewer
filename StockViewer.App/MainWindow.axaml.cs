@@ -226,6 +226,7 @@ public partial class MainWindow : Window
         }
         catch (TimeoutException)
         {
+            DiagnosticLog.Write("popup.first_quote_timeout", new { code = stock.Code, deadlineSeconds = 3, restoringLayout = request.Placement is not null }, "warning");
             if (!closing && !searchHidden && !request.Cancellation.IsCancellationRequested && request.Placement is null)
             {
                 if (dataDelayNotice is null)
@@ -256,11 +257,16 @@ public partial class MainWindow : Window
             var quote = await client.GetSnapshotAsync(stock.Code, token);
             if (!token.IsCancellationRequested && quote.Code == stock.Code && quote.Price > 0) request.Quote.TrySetResult(quote);
         }
-        catch (Exception e) when (IsDataError(e)) { /* The live subscription can still supply the first quote before the deadline. */ }
+        catch (Exception e) when (IsDataError(e))
+        { DiagnosticLog.Write("popup.initial_request_failed", new { code = stock.Code, error = DiagnosticLog.Error(e, token.IsCancellationRequested) }, token.IsCancellationRequested ? "info" : "warning"); }
     }
     private QuoteWindow CreateQuoteWindow(Stock stock, bool showName, Quote quote, ConnectionStatus status, PopupState? placement)
     {
-        if (popups.Remove(stock.Code, out var old)) old.Close();
+        if (popups.Remove(stock.Code, out var old))
+        {
+            DiagnosticLog.Write("popup.replaced", new { code = stock.Code, popupId = old.DiagnosticId, old.IsFixed });
+            old.Close();
+        }
         var popup = new QuoteWindow(stock, showName, selection);
         popup.NativeAppCloseRequested += CloseFromTaskbar;
         popup.Closing += PopupLeavingTaskbar;

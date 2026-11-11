@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify architecture, signature and startup after extracting the release ZIP."""
 import argparse
+import json
 import plistlib
 import subprocess
 import tempfile
@@ -39,6 +40,20 @@ def main():
                     status = process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     print(f"PASS: {args.runtime} ZIP extracted, signature valid, standalone app started")
+                    log_directory = Path.home() / "Library/Application Support/StockViewer/logs"
+                    started = False
+                    for file in log_directory.glob(f"stockviewer-*-{process.pid}-*.jsonl"):
+                        with file.open(encoding="utf-8") as records:
+                            for line in records:
+                                try:
+                                    entry = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue  # The running app may be appending its final line.
+                                if entry.get("event") == "session.started" and entry.get("data", {}).get("version") in (args.version, args.version + ".0"):
+                                    started = True
+                    if not started:
+                        raise SystemExit("Packaged app did not write its versioned startup diagnostic")
+                    print(f"PASS: {args.runtime} packaged app created its startup diagnostic in the default log directory")
                 else:
                     log.seek(0)
                     raise SystemExit(f"App exited early ({status}):\n{log.read()}")

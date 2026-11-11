@@ -12,6 +12,8 @@ namespace StockViewer.Desktop;
 
 public partial class QuoteWindow : Window
 {
+    private static long nextDiagnosticId;
+    internal long DiagnosticId { get; } = Interlocked.Increment(ref nextDiagnosticId);
     public Stock Stock { get; }
     public bool IsFixed { get; private set; }
     public bool IsSelected { get; private set; }
@@ -55,6 +57,7 @@ public partial class QuoteWindow : Window
         };
         Opened += (_, _) =>
         {
+            DiagnosticLog.Write("popup.opened", new { code = Stock.Code, popupId = DiagnosticId, IsFixed });
             selection.Register(this);
             PopupTopmost.Update(this);
             if (!OperatingSystem.IsWindows()) return;
@@ -68,6 +71,7 @@ public partial class QuoteWindow : Window
         PositionChanged += (_, _) => { if (IsFixed && Position != fixedPosition) Position = fixedPosition; };
         Closed += (_, _) =>
         {
+            DiagnosticLog.Write("popup.closed", new { code = Stock.Code, popupId = DiagnosticId, IsFixed, nativeTopmost = PopupTopmost.Read(this) });
             closed = true; ReleaseCapture();
             selection.Remove(this);
             PopupTopmost.Remove(this);
@@ -79,7 +83,12 @@ public partial class QuoteWindow : Window
     private void RefreshTitle() => Title = (NameVisible ? Stock.Name + " · StockViewer" : "StockViewer")
         + (IsSelected ? " · 선택됨" : "");
     public void SetFixed(bool enabled)
-    { fixedPosition = Position; IsFixed = enabled; Topmost = enabled; PopupTopmost.Update(this); SetStatus(StatusMessage); }
+    {
+        var previous = IsFixed; var nativeBefore = PopupTopmost.Read(this);
+        fixedPosition = Position; IsFixed = enabled; Topmost = enabled; PopupTopmost.Update(this); SetStatus(StatusMessage);
+        DiagnosticLog.Write("popup.pin_requested", new { code = Stock.Code, popupId = DiagnosticId, previous, desired = enabled,
+            nativeBefore, nativeAfter = PopupTopmost.Read(this) });
+    }
     internal void SetSelected(bool enabled)
     {
         if (IsSelected == enabled) return;

@@ -17,7 +17,7 @@ public sealed class TossDomesticMarket : IDisposable
     private JsonElement calendar;
     private DateTimeOffset calendarExpires;
     public TossDomesticMarket(HttpMessageHandler? handler = null, TimeProvider? clock = null)
-    { this.clock = clock ?? TimeProvider.System; session = new(handler, this.clock); }
+    { this.clock = clock ?? TimeProvider.System; session = new(handler, this.clock, "toss.domestic"); }
 
     private static bool IsDataError(Exception e) => e is IOException or InvalidDataException or HttpRequestException or JsonException or OperationCanceledException;
     private async Task<TossDomesticProduct> ResolveAsync(string symbol, CancellationToken cancellation)
@@ -42,8 +42,10 @@ public sealed class TossDomesticMarket : IDisposable
                 && extra.TryGetProperty("afterMarketPossYn", out var flag) && flag.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 after = flag.GetBoolean();
         }
-        catch (Exception e) when (!cancellation.IsCancellationRequested && IsDataError(e)) { /* A valid price can still be shown with unknown session status. */ }
+        catch (Exception e) when (!cancellation.IsCancellationRequested && IsDataError(e))
+        { DiagnosticLog.Write("metadata.unavailable", new { provider = "toss.domestic", code = symbol, operation = "krx_extended_hours", error = DiagnosticLog.Error(e) }, "warning"); }
         var product = new TossDomesticProduct(code, symbol, nxt, after);
+        DiagnosticLog.Write("product.resolved", new { provider = "toss.domestic", code = symbol, product.NxtSupported, product.KrxAfterSupported });
         var midnight = new DateTimeOffset(now.ToOffset(TimeSpan.FromHours(9)).Date.AddDays(1), TimeSpan.FromHours(9));
         var expires = now.AddSeconds(after.HasValue ? 60 : 5);
         products[symbol] = (product, expires < midnight ? expires : midnight);
@@ -135,7 +137,10 @@ public sealed class TossDomesticMarket : IDisposable
                     calendar = ats; calendarExpires = now.AddSeconds(30);
                 }
                 catch (Exception e) when (!cancellation.IsCancellationRequested && IsDataError(e))
-                { calendar = default; calendarExpires = now.AddSeconds(5); }
+                {
+                    DiagnosticLog.Write("calendar.unavailable", new { provider = "toss.domestic", error = DiagnosticLog.Error(e) }, "warning");
+                    calendar = default; calendarExpires = now.AddSeconds(5);
+                }
             }
             var symbols = codes.Distinct().ToArray();
             if (symbols.Any(code => !StockCode.IsDomestic(code))) throw new ArgumentException("잘못된 국내 종목코드입니다.");

@@ -114,6 +114,17 @@ jobs:
           $taskProcess = Start-Process -FilePath $taskExecutable -WorkingDirectory $taskSmokeDirectory -WindowStyle Hidden -PassThru
           try {
             if ($taskProcess.WaitForExit(5000)) { throw "Standalone EXE exited unexpectedly: $($taskProcess.ExitCode)" }
+            $taskLogsDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'StockViewer/logs'
+            $taskLogFiles = @(Get-ChildItem -LiteralPath $taskLogsDirectory -Filter "stockviewer-*-$($taskProcess.Id)-*.jsonl")
+            $taskLoggedStartup = $false
+            foreach ($taskLogFile in $taskLogFiles) {
+              $taskRecord = Get-Content -LiteralPath $taskLogFile.FullName -TotalCount 1 | ConvertFrom-Json
+              if ($taskRecord.event -eq 'session.started' -and $taskRecord.data.version -in @($env:RELEASE_VERSION, "$env:RELEASE_VERSION.0")) {
+                $taskLoggedStartup = $true
+              }
+            }
+            if (-not $taskLoggedStartup) { throw 'Standalone EXE did not write its versioned startup diagnostic.' }
+            Write-Output 'PASS: standalone EXE created its startup diagnostic in the default log directory'
           } finally {
             if (-not $taskProcess.HasExited) { Stop-Process -Id $taskProcess.Id -Force }
           }
