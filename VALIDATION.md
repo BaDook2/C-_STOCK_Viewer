@@ -132,3 +132,8 @@
 - 앞서 로컬 앱에 반영한 가격창 간격·바깥 투명 여백 제거를 같은 릴리즈에 포함함. 검색창 주위 4 DIP 간격과 기존 창 위치는 유지함.
 - 실제 창 자동완성 검사에서 키를 보내기 전에 대상 검색창의 활성화·입력 포커스·목록 표시를 기다리도록 검사 준비 조건을 보완함. 임시 진단 코드는 제거함.
 - 최종 로컬 Release 빌드 경고 0/오류 0, Mac 실제 창 검사 241개 통과. 1초 후 색상 복귀, 반복 클릭 타이머 재시작과 버튼별 독립 복귀를 확인함.
+- [v2.2.3 릴리즈 workflow](https://github.com/BaDook2/C-_STOCK_Viewer/actions/runs/42936821532) 전체 성공. Windows·Apple Silicon·Intel Mac 헤드리스 각 435개, 실제 창 검사 Windows 249개·두 Mac 각 241개 통과. 세 플랫폼 모두 1초 색상 복귀와 간격 없는 가격창 배치를 통과함.
+- Windows EXE 단독 시작과 두 Mac ZIP 압축 해제·서명·아키텍처·독립 실행을 통과한 뒤 [v2.2.3](https://github.com/BaDook2/C-_STOCK_Viewer/releases/tag/v2.2.3)을 최신 정식 릴리즈로 게시함. 태그 커밋 c37c9f10c9ff9645c89721e5be95338e6af51b90를 별도 fetch로 확인함.
+- 실제 첨부 3개를 다시 내려받아 SHA256SUMS·GitHub digest·크기를 대조하고 Windows PE x64, 두 Mac 앱과 바탕화면 모듈의 CPU·버전·번들 서명을 검사함. 검증된 파일은 outputs/v2.2.3에 보관함.
+- SHA-256 Windows: 40270438cf687a4cb3ee8108f15bf2330f2524dfce0aa41aef675db76f3ace0e; Mac arm64: 74a0ad3009d09064127cd9ec65339ef2b69afbca349da00078169eb231712c03; Mac x64: f93d02df171d2202110a24a5f748971da3033acefdb2ca87d83e5fc240d5a4cb.
+- 로컬 루트 앱을 공식 v2.2.3으로 교체·실행하고 저장 버튼의 빨간 표시와 기본색 복귀를 직접 확인함. 저장 배치를 불러와 실제 가격창이 표시됨을 확인함. 실행용 .app 하나와 현재·이전 두 릴리즈(v2.2.3·v2.2.2·v2.2.1)를 유지하고 교체 전 앱·이전 보관본은 휴지통으로 이동함.
