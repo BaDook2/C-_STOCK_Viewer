@@ -8,7 +8,7 @@ public static class PopupPlacement
     public static PixelPoint ClampToWorkArea(PixelPoint position, PixelSize size, PixelRect area) => new(
         Math.Clamp(position.X, area.X, Math.Max(area.X, area.Right - size.Width)),
         Math.Clamp(position.Y, area.Y, Math.Max(area.Y, area.Bottom - size.Height)));
-    public static void BelowSearch(Window popup, Window search, IEnumerable<Window>? occupied = null) => BelowAnchor(popup, search, occupied);
+    public static void BelowSearch(Window popup, Window search, IEnumerable<Window>? occupied = null) => BelowAnchor(popup, search, occupied, compact: true);
     public static void BelowQuote(Window search, Window quote) => BelowAnchor(search, quote);
     public static void AvoidQuotes(Window search, IEnumerable<Window> quotes)
     {
@@ -18,7 +18,7 @@ public static class PopupPlacement
         var size = PixelSize.FromSize(PlacementSize(search), screen.Scaling);
         var occupied = quotes.Where(q => q.IsVisible).Select(q =>
             new PixelRect(q.Position, PixelSize.FromSize(PlacementSize(q), q.RenderScaling)));
-        search.Position = FindFreePosition(search.Position, size, screen.WorkingArea, occupied, screen.Scaling);
+        search.Position = FindFreePosition(search.Position, size, screen.WorkingArea, occupied, screen.Scaling, gapDip: 4);
     }
     public static PixelPoint BelowAnchor(PixelRect anchor, PixelSize popup, PixelRect workArea, double scaling = 1)
     {
@@ -30,9 +30,9 @@ public static class PopupPlacement
             Math.Clamp(top, workArea.Y, Math.Max(workArea.Y, workArea.Bottom - popup.Height)));
     }
     public static PixelPoint FindFreePosition(PixelPoint preferred, PixelSize size, PixelRect workArea,
-        IEnumerable<PixelRect> occupied, double scaling = 1)
+        IEnumerable<PixelRect> occupied, double scaling = 1, double gapDip = 0)
     {
-        var gap = Math.Max(1, (int)Math.Round(4 * scaling));
+        var gap = Math.Max(0, (int)Math.Round(gapDip * scaling));
         var maxX = Math.Max(workArea.X, workArea.Right - size.Width);
         var maxY = Math.Max(workArea.Y, workArea.Bottom - size.Height);
         preferred = new(Math.Clamp(preferred.X, workArea.X, maxX), Math.Clamp(preferred.Y, workArea.Y, maxY));
@@ -61,7 +61,7 @@ public static class PopupPlacement
     private static Size PlacementSize(Window window) => new(
         Math.Max(window.ClientSize.Width, window.DesiredSize.Width),
         Math.Max(window.ClientSize.Height, window.DesiredSize.Height));
-    private static void BelowAnchor(Window popup, Window anchor, IEnumerable<Window>? occupied = null)
+    private static void BelowAnchor(Window popup, Window anchor, IEnumerable<Window>? occupied = null, bool compact = false)
     {
         popup.Measure(Size.Infinity);
         var sourceScale = anchor.RenderScaling;
@@ -73,9 +73,13 @@ public static class PopupPlacement
         var popupSize = PixelSize.FromSize(PlacementSize(popup), scale);
         var workArea = monitor?.WorkingArea ?? new PixelRect(anchor.Position.X - 2000, anchor.Position.Y - 2000, 4000, 4000);
         var preferred = BelowAnchor(bounds, popupSize, workArea, scale);
+        // Quotes touch each other, while the search controls keep their gap.
+        var anchorGap = compact ? (int)Math.Round(4 * scale) : 0;
+        var anchorObstacle = new PixelRect(bounds.X - anchorGap, bounds.Y - anchorGap,
+            bounds.Width + 2 * anchorGap, bounds.Height + 2 * anchorGap);
         var obstacles = (occupied ?? []).Where(w => !ReferenceEquals(w, popup) && !ReferenceEquals(w, anchor)
             && w.IsVisible && w.WindowState != WindowState.Minimized)
-            .Select(w => new PixelRect(w.Position, PixelSize.FromSize(PlacementSize(w), w.RenderScaling))).Append(bounds);
-        popup.Position = FindFreePosition(preferred, popupSize, workArea, obstacles, scale);
+            .Select(w => new PixelRect(w.Position, PixelSize.FromSize(PlacementSize(w), w.RenderScaling))).Append(anchorObstacle);
+        popup.Position = FindFreePosition(preferred, popupSize, workArea, obstacles, scale, gapDip: compact ? 0 : 4);
     }
 }

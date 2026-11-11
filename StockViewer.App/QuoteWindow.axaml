@@ -16,7 +16,7 @@
       <Setter Property="Padding" Value="7,2" />
     </Style>
   </Window.Styles>
-  <Border Name="Card" Margin="2" CornerRadius="5" Background="{DynamicResource SurfaceBrush}">
+  <Border Name="Card" CornerRadius="5" Background="{DynamicResource SurfaceBrush}">
     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
       <TextBlock Name="StockName" FontSize="12" MaxWidth="104" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" VerticalAlignment="Center" />
       <TextBlock Name="PriceText" Text="—" FontSize="13" MinWidth="64" FontWeight="SemiBold" VerticalAlignment="Center" />

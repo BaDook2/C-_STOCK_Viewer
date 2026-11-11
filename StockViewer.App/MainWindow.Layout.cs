@@ -88,7 +88,7 @@ public partial class MainWindow
         if (closing || searchHidden) return;
         if (!layoutFeedback.TryGetValue(button, out var timer))
         {
-            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             timer.Tick += (_, _) => { timer.Stop(); button.Classes.Remove("layout-feedback"); };
             layoutFeedback.Add(button, timer);
         }

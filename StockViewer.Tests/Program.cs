@@ -202,10 +202,13 @@ internal static partial class Program
             box.Text = ""; await Idle(); box.Text = query; await Idle();
             Check(box.Text == query && box.IsFocused, "clear and retype remains responsive: " + query);
         }
+        // Native activation is asynchronous; send navigation only after the
+        // intended search window has focus and its dropdown is visible.
+        main.Activate(); box.Focus(); await Until(() => main.IsActive && box.IsKeyboardFocusWithin);
         var requestCount = remote.Requests.Count; box.Text = "큐리";
         await Until(() => remote.Requests.Count > requestCount);
         remote.Requests[^1].Reply.TrySetResult([new("115180", "큐리언트", "KOSDAQ"), new("445680", "큐리옥스바이오시스템즈", "KOSDAQ")]);
-        await Until(() => results.ItemCount == 2);
+        await Until(() => results.ItemCount == 2 && Find<Avalonia.Controls.Primitives.Popup>(main, "Suggestions").IsOpen);
         Check(results.SelectedIndex == 0, "remote Korean autocomplete selects the first valid result");
         box.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Down });
         box.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Enter });

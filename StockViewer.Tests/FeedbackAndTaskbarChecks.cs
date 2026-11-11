@@ -31,14 +31,14 @@ internal static partial class Program
             Check(load.Classes.Contains("layout-feedback") && main.Popups.Count == 1 && main.OwnedWindows.Count == 0,
                 "loading restores the layout and highlights its button without a notification popup");
             save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Task.Delay(1700);
+            await Task.Delay(600);
             save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Task.Delay(1600);
+            await Task.Delay(600);
             Check(save.Classes.Contains("layout-feedback") && !load.Classes.Contains("layout-feedback"),
-                "a repeated save restarts its three-second feedback without extending the load button feedback");
-            await Task.Delay(1550);
+                "a repeated save restarts its one-second feedback without extending the load button feedback");
+            await Task.Delay(550);
             Check(!save.Classes.Contains("layout-feedback") && BrushColor(save.Foreground) == ThemeColor(save, "TextSecondaryBrush"),
-                "the button returns to its normal colour three seconds after its most recent click");
+                "the button returns to its normal colour one second after its most recent click");
             save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); HideSearch(main); await Idle();
             Check(!save.Classes.Contains("layout-feedback") && main.Popups.Count == 1,
                 "hiding search clears pending feedback while keeping quotes open");

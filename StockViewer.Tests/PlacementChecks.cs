@@ -12,24 +12,24 @@ internal static partial class Program
     {
         var area = new PixelRect(0, 0, 800, 600); var size = new PixelSize(160, 32); var preferred = new PixelPoint(200, 200);
         Check(PopupPlacement.FindFreePosition(preferred, size, area, []) == preferred, "an empty popup position remains unchanged");
-        Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(200, 200, 180, 32)]) == new PixelPoint(200, 236),
-            "a new quote is placed below an occupied position with a four-DIP gap");
-        Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(200, 200, 180, 32), new(180, 236, 220, 32)]) == new PixelPoint(200, 272),
+        Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(200, 200, 180, 32)]) == new PixelPoint(200, 232),
+            "a new quote touches the bottom edge of the occupied position without a gap");
+        Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(200, 200, 180, 32), new(180, 232, 220, 32)]) == new PixelPoint(200, 264),
             "stacking skips all overlapping rows even when their widths differ");
-        Check(PopupPlacement.FindFreePosition(new(200, 568), size, area, [new(200, 568, 180, 32)]) == new PixelPoint(200, 532),
+        Check(PopupPlacement.FindFreePosition(new(200, 568), size, area, [new(200, 568, 180, 32)]) == new PixelPoint(200, 536),
             "a bottom-edge quote stacks above the existing popup instead of leaving the screen");
-        Check(PopupPlacement.FindFreePosition(new(200, 568), size, area, [new(200, 568, 180, 32), new(180, 500, 286, 64)]) == new PixelPoint(200, 464),
+        Check(PopupPlacement.FindFreePosition(new(200, 568), size, area, [new(200, 568, 180, 32), new(180, 500, 286, 64)]) == new PixelPoint(200, 468),
             "upward stacking also avoids covering the search window");
-        Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(350, 200, 200, 32)]) == new PixelPoint(200, 236),
+        Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(350, 200, 200, 32)]) == new PixelPoint(200, 232),
             "partial horizontal overlaps are detected rather than comparing only window origins");
         Check(PopupPlacement.FindFreePosition(preferred, size, area, [new(500, 200, 180, 32)]) == preferred,
             "an unrelated quote in another column does not shift the new popup");
         Check(PopupPlacement.FindFreePosition(new(-1500, 200), new(240, 48), new(-1600, 0, 1600, 900), [new(-1500, 200, 240, 48)], 1.5)
-            == new PixelPoint(-1500, 254), "stacking uses physical pixels and a six-pixel gap at 150-percent DPI on a negative-coordinate monitor");
+            == new PixelPoint(-1500, 248), "quotes also touch at 150-percent DPI on a negative-coordinate monitor");
         Check(PopupPlacement.FindFreePosition(new(0, 0), new(100, 32), new(0, 0, 600, 120),
-            [new(0, 0, 100, 32), new(0, 36, 100, 32), new(0, 72, 100, 32)]) == new PixelPoint(104, 0),
-            "a filled vertical column uses the next free column on the same monitor");
-        var crowded = Enumerable.Range(0, 12).Select(i => new PixelRect(200, 100 + i * 36, 200, 32)).ToArray();
+            [new(0, 0, 100, 32), new(0, 32, 100, 32), new(0, 64, 100, 32)]) == new PixelPoint(100, 0),
+            "a filled vertical column uses the adjacent column without adding a horizontal gap");
+        var crowded = Enumerable.Range(0, 12).Select(i => new PixelRect(200, 100 + i * 32, 200, 32)).ToArray();
         var position = PopupPlacement.FindFreePosition(new(200, 100), size, area, crowded);
         Check(!crowded.Any(r => Overlaps(new(position, size), r)) && position.Y >= area.Y && position.Y + size.Height <= area.Bottom,
             "a long stack finds a visible free position without overlapping any existing quote");
@@ -49,9 +49,11 @@ internal static partial class Program
                 && !Overlaps(WindowRect(second), WindowRect(third)), "opening three actual quote windows never covers the earlier quotes");
             Check(first.Position == original && first.IsFixed && second.Position == secondPosition,
                 "placement moves only the new window and preserves existing fixed and free windows");
-            Check(second.Position.Y >= WindowRect(first).Bottom + (int)Math.Round(4 * second.RenderScaling)
-                && third.Position.Y >= WindowRect(second).Bottom + (int)Math.Round(4 * third.RenderScaling),
-                "actual new quote windows stack downward while space remains");
+            Check(second.Position.Y == WindowRect(first).Bottom && third.Position.Y == WindowRect(second).Bottom,
+                "actual new quote windows touch vertically while space remains");
+            Check(new[] { first, second, third }.All(p => Find<Avalonia.Controls.Border>(p, "Card").Bounds
+                == new Rect(default(Point), p.ClientSize)),
+                "the visible price cards fill their windows without transparent spacing between stacked quotes");
             var replacement = (await main.OpenStockAsync(DemoMarketData.SampleStocks[0]))!; await Idle();
             Check(!first.IsVisible && replacement.Position.Y == original.Y && !Overlaps(WindowRect(replacement), WindowRect(second)),
                 "reopening the same symbol reuses its vacated slot rather than counting the old window as occupied");
